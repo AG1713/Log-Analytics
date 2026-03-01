@@ -1,0 +1,15 @@
+{
+    "total_attacks": 82332,
+    "distribution": {
+        "Fuzzers": 15560,
+        "Normal": 25141,
+        "Exploits": 15970,
+        "Shellcode": 265,
+        "DoS": 3355,
+        "Reconnaissance": 3147,
+        "Worms": 44,
+        "Backdoor": 52,
+        "Generic": 18742,
+        "Analysis": 56
+    }
+}
