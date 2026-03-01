@@ -2,6 +2,15 @@ import { Shield, AlertTriangle, Activity, BarChart3 } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { useEffect, useState } from "react";
 
+// Commands for running the frontend
+// cd frontend (if terminal is not already in the frontend folder)
+// npm install
+// npm run dev
+
+// NOTE: even if the venv from backend is active in this terminal in vscode, the above commands won't nterfere with it
+// in short, u are safe to run the above commands even if venv is activated.
+
+
 export default function App() {
   const [summary, setSummary] = useState(null);
 
