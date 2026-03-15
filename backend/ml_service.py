@@ -3,33 +3,104 @@ import pandas as pd
 import os
 from collections import Counter
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # backend
+PROJECT_ROOT = os.path.dirname(BASE_DIR)                # ai-proactive-siem
+DATA_PATH = os.path.join(
+    PROJECT_ROOT,
+    "ml_training",
+    "unsw",
+    "UNSW_NB15_testing-set.csv"
+)
 
 model = joblib.load(os.path.join(BASE_DIR, "trained_model", "unsw_attack_classifier.pkl"))
 label_encoder = joblib.load(os.path.join(BASE_DIR, "trained_model", "unsw_label_encoder.pkl"))
 
+# Map attack categories to severity levels
+SEVERITY_MAP = {
+    "Normal":         "normal",
+    "Worms":          "critical",
+    "Backdoors":      "critical",
+    "Shellcode":      "critical",
+    "Exploits":       "high",
+    "DoS":            "high",
+    "Generic":        "medium",
+    "Fuzzers":        "medium",
+    "Reconnaissance": "low",
+}
+
 def generate_attack_summary():
+    print("Reading file from:", DATA_PATH)
 
-    df = pd.read_csv(os.path.join(BASE_DIR, "UNSW_NB15_testing-set.csv"))
+    if not os.path.exists(DATA_PATH):
+        raise FileNotFoundError(f"CSV file not found at: {DATA_PATH}")
 
-    df = df.drop(columns=["id", "label"])
+    df = pd.read_csv(DATA_PATH)
 
     categorical_cols = ["proto", "service", "state"]
 
+    # Save original values before encoding for distribution stats
+    proto_raw   = df["proto"].copy()
+    service_raw = df["service"].copy()
+    state_raw   = df["state"].copy()
+
+    df_model = df.drop(columns=["id", "label", "attack_cat"])
     for col in categorical_cols:
-        df[col] = df[col].astype("category").cat.codes
+        df_model[col] = df_model[col].astype("category").cat.codes
 
-    X = df.drop(columns=["attack_cat"])
-
+    X = df_model
     predictions = model.predict(X)
-
     decoded = label_encoder.inverse_transform(predictions)
 
-    counts = Counter(decoded)
+    df["predicted_cat"] = decoded
 
-    total = sum(counts.values())
+    # --- Attack distribution ---
+    attack_counts = Counter(decoded)
+    total = sum(attack_counts.values())
+    attack_only = {k: v for k, v in attack_counts.items() if k != "Normal"}
+
+    # --- Severity distribution ---
+    severity_counts = Counter()
+    for cat, count in attack_counts.items():
+        sev = SEVERITY_MAP.get(cat, "low")
+        severity_counts[sev] += count
+
+    # --- Protocol distribution (attacks only) ---
+    attack_mask = df["predicted_cat"] != "Normal"
+    proto_counts = Counter(proto_raw[attack_mask].str.lower())
+
+    # --- Service distribution (attacks only, exclude "-") ---
+    service_counts = Counter(
+        s for s in service_raw[attack_mask].str.lower() if s != "-"
+    )
+
+    # --- State distribution (attacks only) ---
+    state_counts = Counter(state_raw[attack_mask].str.upper())
+
+    # --- Recent alerts (last 20 attack records) ---
+    attack_rows = df[attack_mask].tail(20)
+    recent_alerts = []
+    for _, row in attack_rows.iterrows():
+        cat = row["predicted_cat"]
+        recent_alerts.append({
+            "id":       int(row["id"]),
+            "type":     cat,
+            "severity": SEVERITY_MAP.get(cat, "low"),
+            "proto":    proto_raw[row.name].lower(),
+            "service":  service_raw[row.name].lower(),
+            "state":    state_raw[row.name].upper(),
+            "duration": round(float(row["dur"]), 4),
+            "sbytes":   int(row["sbytes"]),
+            "dbytes":   int(row["dbytes"]),
+        })
 
     return {
-        "total_attacks": total,
-        "distribution": counts
+        "total_records":        total,
+        "total_attacks":        total - attack_counts.get("Normal", 0),
+        "total_normal":         attack_counts.get("Normal", 0),
+        "attack_distribution":  dict(attack_counts),
+        "severity_distribution": dict(severity_counts),
+        "protocol_distribution": dict(proto_counts.most_common(6)),
+        "service_distribution":  dict(service_counts.most_common(6)),
+        "state_distribution":    dict(state_counts),
+        "recent_alerts":         recent_alerts,
     }

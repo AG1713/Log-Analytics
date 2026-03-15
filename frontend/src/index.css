@@ -1,7 +1,54 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-body {
-  @apply bg-slate-950 text-white;
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --background: 214 35% 6%; /* #060d1a — your main bg */
+    --foreground: 210 40% 93%; /* #e2f0ff — your text */
+
+    --card: 214 32% 11%; /* #0d1626 — your card bg */
+    --card-foreground: 210 40% 93%;
+
+    --popover: 214 32% 11%;
+    --popover-foreground: 210 40% 93%;
+
+    --primary: 191 100% 50%; /* #00d4ff — your cyan accent */
+    --primary-foreground: 214 35% 6%;
+
+    --secondary: 214 32% 11%;
+    --secondary-foreground: 210 40% 93%;
+
+    --muted: 214 30% 15%;
+    --muted-foreground: 210 20% 40%;
+
+    --accent: 214 30% 15%;
+    --accent-foreground: 210 40% 93%;
+
+    --destructive: 0 84% 60%; /* #ef4444 */
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214 30% 15%; /* #0f1e36 — your border */
+    --input: 214 30% 15%;
+    --ring: 191 100% 50%;
+
+    --radius: 0.5rem;
+
+    /* Sidebar specifically */
+    --sidebar-background: 214 33% 8%; /* #080f1f — your sidebar bg */
+    --sidebar-foreground: 210 40% 93%;
+    --sidebar-primary: 191 100% 50%;
+    --sidebar-primary-foreground: 214 35% 6%;
+    --sidebar-accent: 214 30% 13%;
+    --sidebar-accent-foreground: 210 40% 93%;
+    --sidebar-border: 214 30% 12%;
+    --sidebar-ring: 191 100% 50%;
+  }
+}
+
+@layer base {
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
 }
