@@ -15,8 +15,10 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - ./ml_training:/ml_training  # This "injects" the folder into the container
     environment:
       - WATCHFILES_FORCE_POLLING=true
+      - ML_DATA_PATH=/ml_training/unsw/UNSW_NB15_testing-set.csv
       # Use the service name 'mongodb' so the backend can find the DB
       - MONGO_URI=mongodb://mongodb:27017/siem_db
     depends_on:

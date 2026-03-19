@@ -1,0 +1,2 @@
+curl http://localhost:8080/test-attack
+docker exec -it log-analytics-mongodb-1 mongo siem_db --eval 'db.raw_logs.count()'
