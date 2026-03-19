@@ -1,0 +1,33 @@
+# Use the official Nginx image
+FROM nginx:latest
+
+# Install Python and Pip for the Log Agent
+RUN apt update && apt-get install -y \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install the MongoDB driver
+RUN pip3 install pymongo --break-system-packages
+
+# --- CRITICAL FIX: BREAK SYMBOLIC LINKS ---
+# By default, Nginx logs go to /dev/stdout. We need them in a REAL file 
+# so 'tail' in your agent.py can actually see the data.
+RUN unlink /var/log/nginx/access.log && \
+    unlink /var/log/nginx/error.log && \
+    touch /var/log/nginx/access.log && \
+    touch /var/log/nginx/error.log && \
+    chown nginx:nginx /var/log/nginx/*.log
+
+# Copy your website files to the Nginx html folder
+COPY ./nonprofitwebsite /usr/share/nginx/html
+
+# Copy the agent script and a startup helper
+COPY agent.py /usr/local/bin/agent.py
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+
+# Make the helper script executable
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Use the helper script to start both Nginx and the Agent
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

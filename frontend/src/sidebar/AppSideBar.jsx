@@ -1,4 +1,4 @@
-import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar'
+import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger } from '@/components/ui/sidebar'
 import { LayoutDashboard, ShieldAlert, Bot, FolderSearch } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 
@@ -13,7 +13,13 @@ const AppSideBar = () => {
   const location = useLocation()
 
   return (
-    <Sidebar>
+    <Sidebar collapsible='icon'>
+      <SidebarHeader className="flex flex-row items-center justify-between p-3">
+        <span className="font-semibold text-sm group-data-[collapsible=icon]:hidden whitespace-nowrap">
+          Log Analytics
+        </span>
+        <SidebarTrigger />
+      </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupContent>

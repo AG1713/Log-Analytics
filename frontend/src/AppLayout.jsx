@@ -16,8 +16,8 @@ const AppLayout = () => {
   return (
     <SidebarProvider>
         <AppSideBar/>
-        <main className="h-screen w-screen flex flex-1">
-          <SidebarTrigger />
+        <main className="flex flex-col flex-1 min-h-screen overflow-auto w-0">
+          {/* <SidebarTrigger /> */}
           <Outlet />
         </main>
 

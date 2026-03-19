@@ -1,0 +1,39 @@
+services:
+  mongodb:
+    image: mongo:4.4.29
+    ports:
+      - "27017:27017" 
+    # extra_hosts allows containers to resolve the host machine's gateway
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - mongo_data:/data/db
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    environment:
+      - WATCHFILES_FORCE_POLLING=true
+      # Use the service name 'mongodb' so the backend can find the DB
+      - MONGO_URI=mongodb://mongodb:27017/siem_db
+    depends_on:
+      - mongodb
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+
+# Persistence ensures your logs stay saved even if you restart the containers
+volumes:
+  mongo_data:
