@@ -4,5 +4,5 @@ curl http://localhost:8080/test-attack
 Check Whether the data is being to mongo db
 docker exec -it log-analytics-mongodb-1 mongo siem_db --eval 'db.raw_logs.count()'
 
-To check, which data is being going to mongodb
+To check, which data is being going to mongodb for the auth logs
 docker exec -it log-analytics-mongodb-1 mongo siem_db --eval 'db.raw_logs.find().sort({_id:-1}).limit(5).pretty()'
