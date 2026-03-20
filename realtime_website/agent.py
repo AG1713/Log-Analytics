@@ -9,9 +9,9 @@ import threading
 
 # Using the 172.19.0.1 Gateway for your Parrot OS Docker Bridge
 SIEM_DB_URL = "mongodb://172.17.0.1:27017/"
-WATCH_PATHS = ["/etc/nginx", "/var/www/html", "/root"] # Change these according to User
+WATCH_PATHS = ["/etc/nginx", "/var/www/html", "/root", "/var/log/nginx"] # Change these according to User
 CHECK_INTERVAL = 2 # seconds
-BACKEND_URL = "http://backend:8000/api/alerts" # Your FastAPI endpoint
+BACKEND_URL = "http://172.17.0.1:8000/api/alerts" # Your FastAPI endpoint
 
 def calculate_sha256(filepath):
     """Generates a SHA256 hash for a specific file."""
