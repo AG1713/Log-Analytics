@@ -3,14 +3,13 @@ import pandas as pd
 import os
 from collections import Counter
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # backend
-PROJECT_ROOT = os.path.dirname(BASE_DIR)                # ai-proactive-siem
-DATA_PATH = os.path.join(
-    PROJECT_ROOT,
-    "ml_training",
-    "unsw",
-    "UNSW_NB15_testing-set.csv"
-)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) # This is /app inside Docker
+DATA_PATH = os.getenv("ML_DATA_PATH")
+if not DATA_PATH:
+    # This part runs if you are NOT in Docker (your original logic)
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    PROJECT_ROOT = os.path.dirname(BASE_DIR)
+    DATA_PATH = os.path.join(PROJECT_ROOT, "ml_training", "unsw", "UNSW_NB15_testing-set.csv")
 
 model = joblib.load(os.path.join(BASE_DIR, "trained_model", "unsw_attack_classifier.pkl"))
 label_encoder = joblib.load(os.path.join(BASE_DIR, "trained_model", "unsw_label_encoder.pkl"))
