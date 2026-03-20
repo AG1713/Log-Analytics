@@ -6,6 +6,7 @@ services:
     # extra_hosts allows containers to resolve the host machine's gateway
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    network_mode: "bridge"
     volumes:
       - mongo_data:/data/db
 
@@ -16,11 +17,12 @@ services:
     volumes:
       - ./backend:/app
       - ./ml_training:/ml_training  # This "injects" the folder into the container
+    network_mode: "bridge"
     environment:
       - WATCHFILES_FORCE_POLLING=true
       - ML_DATA_PATH=/ml_training/unsw/UNSW_NB15_testing-set.csv
       # Use the service name 'mongodb' so the backend can find the DB
-      - MONGO_URI=mongodb://mongodb:27017/siem_db
+      - MONGO_URI=mongodb://172.17.0.1:27017/siem_db
     depends_on:
       - mongodb
 
@@ -31,6 +33,7 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    network_mode: "bridge"
     environment:
       - VITE_API_URL=http://localhost:8000
     depends_on:
