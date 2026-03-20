@@ -9,7 +9,7 @@ import threading
 
 # Using the 172.19.0.1 Gateway for your Parrot OS Docker Bridge
 SIEM_DB_URL = "mongodb://172.17.0.1:27017/"
-WATCH_PATHS = ["/etc/nginx", "/var/www/html", "/root"]
+WATCH_PATHS = ["/etc/nginx", "/var/www/html", "/root"] # Change these according to User
 CHECK_INTERVAL = 60  # seconds
 BACKEND_URL = "http://backend:8000/api/alerts" # Your FastAPI endpoint
 
@@ -23,6 +23,7 @@ def calculate_sha256(filepath):
                 sha256_hash.update(byte_block)
         return sha256_hash.hexdigest()
     except (PermissionError, FileNotFoundError):
+        print("Permission Not Present")
         return None
 
 def run_fim_monitor(client):
@@ -41,11 +42,11 @@ def run_fim_monitor(client):
     for path in WATCH_PATHS:
         for root, _, files in os.walk(path):
             for file in files:
-                full_path = os.path.join(root, file)
+                full_path = os.path.join(root, file) # example: root:/etc/nginx file:access
                 file_hash = calculate_sha256(full_path)
                 if file_hash:
-                    baseline[full_path] = file_hash
-                    hashes_col.update_one(
+                    baseline[full_path] = file_hash # Captures the initial baseline, i.e a reference for checking the next file hashes
+                    hashes_col.update_one( # Updated the hashes column
                         {"filepath": full_path},
                         {"$set": {"hash": file_hash, "last_check": time.time()}},
                         upsert=True
@@ -63,21 +64,21 @@ def run_fim_monitor(client):
             for root, _, files in os.walk(path):
                 for file in files:
                     full_path = os.path.join(root, file)
-                    files_found_on_disk.add(full_path) # Mark file as present
+                    files_found_on_disk.add(full_path) # Mark file as present, i.e the file is present in the path as expected
                     
                     current_hash = calculate_sha256(full_path)
                     if not current_hash: continue
 
                     # --- DETECT NEW FILES ---
-                    if full_path not in baseline:
+                    if full_path not in baseline: # initially the file was not present in the directory/folder, but it is present now
                         alert = {"type": "FIM_NEW_FILE", "file": full_path, "severity": "medium"}
                         send_fim_alert(alert)
-                        alerts_col.insert_one({**alert, "time": time.ctime(), "hash": current_hash})
+                        alerts_col.insert_one({**alert, "time": time.ctime(), "hash": current_hash}) # add to the alert's column
                         baseline[full_path] = current_hash
                         hashes_col.insert_one({"filepath": full_path, "hash": current_hash})
 
                     # --- DETECT MODIFICATIONS ---
-                    elif current_hash != baseline[full_path]:
+                    elif current_hash != baseline[full_path]: # if the files in baseline files is not present, i.e it is modified 
                         alert = {"type": "FIM_MODIFICATION", "file": full_path, "severity": "high"}
                         send_fim_alert(alert)
                         alerts_col.insert_one({
