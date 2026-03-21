@@ -6,16 +6,15 @@ import hashlib
 import requests
 import os
 import threading
-from scapy.all import sniff, IP, TCP
-import datetime
+from scapy.all import sniff, IP, TCP, UDP
+from datetime import datetime, timezone
 
 # --- CONFIGURATION ---
 SIEM_DB_URL = "mongodb://172.17.0.1:27017/"
-# These are used only if the Backend API is unreachable
 DEFAULT_PATHS = ["/etc/nginx", "/var/www/html", "/root", "/var/log/nginx"] 
 CHECK_INTERVAL = 10 
 BACKEND_URL = "http://172.17.0.1:8000/api/alerts"
-CONFIG_URL = "http://172.17.0.1:8000/api/config" # The new endpoint we added to main.py
+CONFIG_URL = "http://172.17.0.1:8000/api/config"
 SERVICE_MAP = {80: "http", 443: "http", 53: "dns", 21: "ftp", 22: "ssh"}
 PROTO_MAP = {6: "tcp", 17: "udp", 1: "icmp"}
 
@@ -30,25 +29,22 @@ def calculate_sha256(filepath):
     except (PermissionError, FileNotFoundError):
         return None
 
-# global session tracker to calculate timings and aggregates
-# Format: {(src, sport, dst, dport): {last_time: x, syn_time: y, ...}}
 sessions = {}
 
 def process_packet(packet, logs_col):
     if packet.haslayer(IP):
-        now = datetime.datetime.utcnow()
+        # FIXED: Use timezone-aware datetime and correct class reference
+        now = datetime.now(timezone.utc)
         src_ip = packet[IP].src
         dst_ip = packet[IP].dst
         proto_str = PROTO_MAP.get(packet[IP].proto, "other")
         
-        # --- 1. Initialize Dataset Attributes ---
-        state = "INT"  # Default for UDP/ICMP
+        state = "INT"
         sbytes, dbytes = 0, 0
         sttl, dttl = 0, 0
         stcpb, dtcpb = 0, 0
-        synack, ackdat = 0, 0  # Initialize to 0 explicitly
+        synack, ackdat = 0.0, 0.0
         
-        # --- 2. Identify Flow & Direction ---
         sport = packet[TCP].sport if packet.haslayer(TCP) else (packet[UDP].sport if packet.haslayer(UDP) else 0)
         dport = packet[TCP].dport if packet.haslayer(TCP) else (packet[UDP].dport if packet.haslayer(UDP) else 0)
         
@@ -59,7 +55,6 @@ def process_packet(packet, logs_col):
 
         is_request = dport in [80, 443, 8080] or proto_str == "udp"
 
-        # --- 3. Byte & TTL Logic (Works for TCP and UDP now) ---
         if is_request:
             sbytes = len(packet)
             sttl = packet[IP].ttl
@@ -67,7 +62,6 @@ def process_packet(packet, logs_col):
             dbytes = len(packet)
             dttl = packet[IP].ttl
 
-        # --- 4. TCP Specific Logic (State & Timings) ---
         if packet.haslayer(TCP):
             flags = packet[TCP].flags
             if 'S' in flags and 'A' not in flags: state = "REQ"
@@ -79,7 +73,6 @@ def process_packet(packet, logs_col):
             if is_request: stcpb = packet[TCP].seq
             else: dtcpb = packet[TCP].seq
 
-            # Handshake Timings
             if 'S' in flags and 'A' not in flags:
                 session['syn_time'] = now
             elif 'S' in flags and 'A' in flags:
@@ -89,17 +82,16 @@ def process_packet(packet, logs_col):
             elif 'A' in flags and session['synack_time']:
                 ackdat = (now - session['synack_time']).total_seconds()
 
-        # --- 5. Inter-packet Times ---
         time_diff = (now - session['last_packet_time']).total_seconds()
         sinpkt = time_diff if is_request else 0
         dinpkt = time_diff if not is_request else 0
         session['last_packet_time'] = now
 
-        # --- 6. Final Log Construction ---
         network_log = {
             "source": "network-interface",
             "timestamp": now,
             "src_ip": src_ip, "dst_ip": dst_ip,
+            "src_port": sport, "dst_port": dport, # FIXED: Added ports to dictionary
             "proto": proto_str,
             "state": state,
             "service": SERVICE_MAP.get(dport if is_request else sport, "-"),
@@ -112,25 +104,20 @@ def process_packet(packet, logs_col):
             "processed": False
         }
 
-        # --- 7. Shipping ---
-        # Note: Added 'CON' to the filter if you want to see established connections
-        #if state in ["REQ", "FIN", "RST", "INT", "CON"] and network_log["src_ip"] != "172.17.0.1":
+        # FIXED: Ensure we don't log traffic to our own database (infinite loop prevention)
         if state in ["REQ", "FIN", "RST", "INT", "CON"]:
-            try:
-                if network_log.get("dst_port") != 27017:
+            if network_log["dst_port"] != 27017 and network_log["src_port"] != 27017:
+                try:
                     logs_col.insert_one(network_log)
-            except Exception: pass
+                except Exception: pass
 
 def start_network_sniffer(client):
     db = client.siem_db
-    logs_col = db.network_logs # New collection
+    logs_col = db.network_logs
     print("[*] Network Sniffer active. Capturing traffic...")
-    
-    # Sniff packets (filter='tcp' or leave empty for all traffic)
     sniff(prn=lambda pkt: process_packet(pkt, logs_col), store=0)
 
 def get_latest_watch_paths():
-    """Fetches the current monitoring list from the Backend API."""
     try:
         response = requests.get(CONFIG_URL, timeout=2)
         if response.status_code == 200:
@@ -144,7 +131,6 @@ def run_fim_monitor(client):
     hashes_col = fim_db.file_baselines
     alerts_col = fim_db.fim_alerts
 
-    # --- STEP 1: INITIAL BASELINE ---
     print("[*] FIM: Syncing with Backend Configuration...")
     baseline = {}
     watch_list = get_latest_watch_paths()
@@ -163,11 +149,8 @@ def run_fim_monitor(client):
                     )
     print(f"[+] FIM: Initial Baseline established for {len(baseline)} files.")
 
-    # --- STEP 2: CONTINUOUS DYNAMIC LOOP ---
     while True:
         time.sleep(CHECK_INTERVAL)
-        
-        # Sync paths every loop so the UI can add new folders in real-time
         watch_list = get_latest_watch_paths()
         files_found_on_disk = set()
 
@@ -176,11 +159,9 @@ def run_fim_monitor(client):
                 for file in files:
                     full_path = os.path.join(root, file)
                     files_found_on_disk.add(full_path)
-                    
                     current_hash = calculate_sha256(full_path)
                     if not current_hash: continue
 
-                    # DETECT NEW FILES (Automatically handles newly added directories)
                     if full_path not in baseline:
                         alert = {"type": "FIM_NEW_FILE", "file": full_path, "severity": "medium"}
                         send_fim_alert(alert)
@@ -188,7 +169,6 @@ def run_fim_monitor(client):
                         baseline[full_path] = current_hash
                         hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}}, upsert=True)
 
-                    # DETECT MODIFICATIONS
                     elif current_hash != baseline[full_path]:
                         alert = {"type": "FIM_MODIFICATION", "file": full_path, "severity": "high"}
                         send_fim_alert(alert)
@@ -199,36 +179,26 @@ def run_fim_monitor(client):
                         baseline[full_path] = current_hash
                         hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}})
 
-        # DETECT DELETIONS
         baseline_paths = list(baseline.keys())
         for path in baseline_paths:
-            # If a file is missing AND its parent directory is still in our watch list
             if path not in files_found_on_disk:
                 if any(path.startswith(watched) for watched in watch_list):
                     alert = {"type": "FIM_DELETION", "file": path, "severity": "critical"}
                     print(f"[!!] DELETION DETECTED: {path}")
                     send_fim_alert(alert)
                     alerts_col.insert_one({**alert, "time": time.ctime()})
-                    
                     del baseline[path]
                     hashes_col.delete_one({"filepath": path})
 
 def send_fim_alert(data):
     try:
-        requests.post(BACKEND_URL, json=data, timeout=5)
+        requests.post(BACKEND_URL, json=data, timeout=15)
     except Exception as e:
         print(f"[!] Failed to ship alert: {e}")
 
 def start_log_shipper(client):
-    """
-    Main thread logic for tailing Nginx logs.
-    Ships raw logs to the 'siem_db' for analysis.
-    """
-    # --- STEP 1: Setup Log Collection ---
     db = client.siem_db
     logs_col = db.raw_logs
-
-    # --- STEP 2: Start Tailing access.log ---
     print("[*] Log Shipper active. Tailing Ecommerce logs...")
     proc = subprocess.Popen(
         ['tail', '-F', '/var/log/nginx/access.log'],
@@ -237,7 +207,6 @@ def start_log_shipper(client):
         text=True
     )
 
-    # --- STEP 3: Ship Logs to Mongo ---
     while True:
         line = proc.stdout.readline()
         if line:
@@ -255,9 +224,7 @@ def start_log_shipper(client):
         else:
             time.sleep(0.1)
 
-
 def main():
-    # Connect to MongoDB
     client = None
     while True:
         try:
@@ -270,18 +237,12 @@ def main():
             print(f"[!] Connection failed: {e}. Retrying...")
             time.sleep(5)
 
-    # --- THREAD 1: FIM (File Integrity) ---
     print("[*] Starting FIM Monitor Thread...")
-    fim_thread = threading.Thread(target=run_fim_monitor, args=(client,), daemon=True)
-    fim_thread.start()
+    threading.Thread(target=run_fim_monitor, args=(client,), daemon=True).start()
 
-    # --- THREAD 2: Network Sniffing ---
     print("[*] Starting Network Sniffer Thread...")
-    net_thread = threading.Thread(target=start_network_sniffer, args=(client,), daemon=True)
-    net_thread.start()
+    threading.Thread(target=start_network_sniffer, args=(client,), daemon=True).start()
 
-    # --- THREAD 3 (Main Thread): Log Shipping ---
-    # We keep this in the main thread so the script stays alive
     try:
         start_log_shipper(client)
     except KeyboardInterrupt:
