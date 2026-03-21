@@ -48,6 +48,9 @@ const tooltipStyle = {
     color: "#e2f0ff",
     fontSize: "12px",
   },
+  itemStyle: { color: "#e2f0ff" },    // ← this fixes the black text
+  labelStyle: { color: "#2a4a6a" },
+  cursor: { fill: "#ffffff08" },
 };
 
 // --- Sub-components ---
@@ -204,7 +207,7 @@ export default function Dashboard() {
               <Pie data={attackDistData} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={2} dataKey="value">
                 {attackDistData.map((e, i) => <Cell key={i} fill={e.color} stroke="transparent" />)}
               </Pie>
-              <Tooltip {...tooltipStyle} />
+              <Tooltip {...tooltipStyle} cursor={false} />
             </PieChart>
           </ResponsiveContainer>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5px", marginTop: "8px" }}>
@@ -229,7 +232,7 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
               <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} width={36} />
-              <Tooltip {...tooltipStyle} />
+              <Tooltip {...tooltipStyle} cursor={{ fill: "#ffffff08" }} />
               <Bar dataKey="value" name="Count" fill={COLORS.blue} radius={[0, 3, 3, 0]} opacity={0.85} />
             </BarChart>
           </ResponsiveContainer>
@@ -245,7 +248,7 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
               <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} width={40} />
-              <Tooltip {...tooltipStyle} />
+              <Tooltip {...tooltipStyle} cursor={{ fill: "#ffffff08" }} />
               <Bar dataKey="value" name="Count" fill={COLORS.purple} radius={[0, 3, 3, 0]} opacity={0.85} />
             </BarChart>
           </ResponsiveContainer>
@@ -264,7 +267,7 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-              <Tooltip {...tooltipStyle} />
+              <Tooltip {...tooltipStyle} cursor={{ fill: "#ffffff08" }} />
               <Bar dataKey="value" name="Count" fill={COLORS.amber} radius={[3, 3, 0, 0]} opacity={0.85} />
             </BarChart>
           </ResponsiveContainer>
@@ -278,7 +281,7 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-              <Tooltip {...tooltipStyle} />
+              <Tooltip {...tooltipStyle} cursor={{ fill: "#ffffff08" }} />
               <Bar dataKey="value" name="Count" radius={[3, 3, 0, 0]} opacity={0.85}>
                 {severityData.map((entry, i) => (
                   <Cell key={i} fill={entry.color} />
