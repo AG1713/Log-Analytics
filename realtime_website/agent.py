@@ -7,14 +7,15 @@ import requests
 import os
 import threading
 
-# Using the 172.19.0.1 Gateway for your Parrot OS Docker Bridge
+# --- CONFIGURATION ---
 SIEM_DB_URL = "mongodb://172.17.0.1:27017/"
-WATCH_PATHS = ["/etc/nginx", "/var/www/html", "/root", "/var/log/nginx"] # Change these according to User
-CHECK_INTERVAL = 2 # seconds
-BACKEND_URL = "http://172.17.0.1:8000/api/alerts" # Your FastAPI endpoint
+# These are used only if the Backend API is unreachable
+DEFAULT_PATHS = ["/etc/nginx", "/var/www/html", "/root", "/var/log/nginx"] 
+CHECK_INTERVAL = 2 
+BACKEND_URL = "http://172.17.0.1:8000/api/alerts"
+CONFIG_URL = "http://172.17.0.1:8000/api/config" # The new endpoint we added to main.py
 
 def calculate_sha256(filepath):
-    """Generates a SHA256 hash for a specific file."""
     sha256_hash = hashlib.sha256()
     try:
         if not os.path.isfile(filepath): return None
@@ -23,62 +24,69 @@ def calculate_sha256(filepath):
                 sha256_hash.update(byte_block)
         return sha256_hash.hexdigest()
     except (PermissionError, FileNotFoundError):
-        print("Permission Not Present")
         return None
 
+def get_latest_watch_paths():
+    """Fetches the current monitoring list from the Backend API."""
+    try:
+        response = requests.get(CONFIG_URL, timeout=2)
+        if response.status_code == 200:
+            return response.json().get("paths", DEFAULT_PATHS)
+    except Exception as e:
+        print(f"[!] Config Sync Failed: {e}. Using defaults.")
+    return DEFAULT_PATHS
+
 def run_fim_monitor(client):
-    """
-    Background thread logic for monitoring file integrity.
-    Detects New, Modified, and DELETED files.
-    """
-    # --- STEP 1: Setup FIM Collections ---
     fim_db = client.fim_integrity
     hashes_col = fim_db.file_baselines
     alerts_col = fim_db.fim_alerts
 
-    # --- STEP 2: Establish Initial Baseline ---
-    print("[*] FIM: Establishing Initial Baseline...")
+    # --- STEP 1: INITIAL BASELINE ---
+    print("[*] FIM: Syncing with Backend Configuration...")
     baseline = {}
-    for path in WATCH_PATHS:
+    watch_list = get_latest_watch_paths()
+    
+    for path in watch_list:
         for root, _, files in os.walk(path):
             for file in files:
-                full_path = os.path.join(root, file) # example: root:/etc/nginx file:access
+                full_path = os.path.join(root, file)
                 file_hash = calculate_sha256(full_path)
                 if file_hash:
-                    baseline[full_path] = file_hash # Captures the initial baseline, i.e a reference for checking the next file hashes
-                    hashes_col.update_one( # Updated the hashes column
+                    baseline[full_path] = file_hash
+                    hashes_col.update_one(
                         {"filepath": full_path},
                         {"$set": {"hash": file_hash, "last_check": time.time()}},
                         upsert=True
                     )
-    print("[+] FIM: Baseline synced. Monitoring active.")
+    print(f"[+] FIM: Initial Baseline established for {len(baseline)} files.")
 
-    # --- STEP 3: Continuous Integrity Loop ---
+    # --- STEP 2: CONTINUOUS DYNAMIC LOOP ---
     while True:
         time.sleep(CHECK_INTERVAL)
         
-        # Track which files we find during THIS scan to detect deletions later
+        # Sync paths every loop so the UI can add new folders in real-time
+        watch_list = get_latest_watch_paths()
         files_found_on_disk = set()
 
-        for path in WATCH_PATHS:
+        for path in watch_list:
             for root, _, files in os.walk(path):
                 for file in files:
                     full_path = os.path.join(root, file)
-                    files_found_on_disk.add(full_path) # Mark file as present, i.e the file is present in the path as expected
+                    files_found_on_disk.add(full_path)
                     
                     current_hash = calculate_sha256(full_path)
                     if not current_hash: continue
 
-                    # --- DETECT NEW FILES ---
-                    if full_path not in baseline: # initially the file was not present in the directory/folder, but it is present now
+                    # DETECT NEW FILES (Automatically handles newly added directories)
+                    if full_path not in baseline:
                         alert = {"type": "FIM_NEW_FILE", "file": full_path, "severity": "medium"}
                         send_fim_alert(alert)
-                        alerts_col.insert_one({**alert, "time": time.ctime(), "hash": current_hash}) # add to the alert's column
+                        alerts_col.insert_one({**alert, "time": time.ctime(), "hash": current_hash})
                         baseline[full_path] = current_hash
-                        hashes_col.insert_one({"filepath": full_path, "hash": current_hash})
+                        hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}}, upsert=True)
 
-                    # --- DETECT MODIFICATIONS ---
-                    elif current_hash != baseline[full_path]: # if the files in baseline files is not present, i.e it is modified 
+                    # DETECT MODIFICATIONS
+                    elif current_hash != baseline[full_path]:
                         alert = {"type": "FIM_MODIFICATION", "file": full_path, "severity": "high"}
                         send_fim_alert(alert)
                         alerts_col.insert_one({
@@ -88,31 +96,25 @@ def run_fim_monitor(client):
                         baseline[full_path] = current_hash
                         hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}})
 
-        # --- STEP 4: DETECT DELETIONS ---
-        # We compare our Baseline keys against the files we actually found on disk
+        # DETECT DELETIONS
         baseline_paths = list(baseline.keys())
         for path in baseline_paths:
+            # If a file is missing AND its parent directory is still in our watch list
             if path not in files_found_on_disk:
-                # The file was in our baseline but is now GONE from the disk
-                alert = {"type": "FIM_DELETION", "file": path, "severity": "critical"}
-                
-                print(f"[!!] DELETION DETECTED: {path}")
-                send_fim_alert(alert)
-                
-                # Log the deletion alert to MongoDB
-                alerts_col.insert_one({**alert, "time": time.ctime()})
-                
-                # Remove from baseline and MongoDB so we don't keep alerting
-                del baseline[path]
-                hashes_col.delete_one({"filepath": path})
+                if any(path.startswith(watched) for watched in watch_list):
+                    alert = {"type": "FIM_DELETION", "file": path, "severity": "critical"}
+                    print(f"[!!] DELETION DETECTED: {path}")
+                    send_fim_alert(alert)
+                    alerts_col.insert_one({**alert, "time": time.ctime()})
+                    
+                    del baseline[path]
+                    hashes_col.delete_one({"filepath": path})
 
 def send_fim_alert(data):
-    """Sends integrity alerts to the FastAPI backend."""
     try:
         requests.post(BACKEND_URL, json=data, timeout=5)
-        print(f"[!] FIM Alert Sent: {data['file']}")
     except Exception as e:
-        print(f"[!] Failed to send FIM alert: {e}")
+        print(f"[!] Failed to ship alert: {e}")
 
 def start_log_shipper(client):
     """
