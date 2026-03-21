@@ -27,7 +27,8 @@ COPY agent.py /usr/local/bin/agent.py
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Make the helper script executable
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && \
+    chmod +x /usr/local/bin/entrypoint.sh
 
 # Use the helper script to start both Nginx and the Agent
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
