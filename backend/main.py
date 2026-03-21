@@ -28,6 +28,7 @@ app.add_middleware(
 # Initialize the connection once when the app starts
 client = MongoClient("mongodb://172.17.0.1:27017/")
 db = client.siem_db
+config_db = client.siem_config
 
 def send_email_notification(alert_type, file_path, severity):
     subject = f"⚠️ SIEM ALERT: {alert_type}"
@@ -54,6 +55,39 @@ def send_email_notification(alert_type, file_path, severity):
         print(f"[+] Email alert sent to {VICTIM_EMAIL}")
     except Exception as e:
         print(f"[!] Email failed: {e}")
+
+# --- NEW: DYNAMIC CONFIGURATION ENDPOINTS ---
+
+@app.get("/api/config")
+async def get_config():
+    """Returns the current list of monitored paths to the Agent."""
+    doc = config_db.settings.find_one({"type": "watch_config"})
+    if not doc:
+        # Default starting paths if database is empty
+        return {"paths": ["/etc/nginx", "/var/www/html"]}
+    return {"paths": doc["paths"]}
+
+@app.post("/api/add_path")
+async def add_path(request: Request):
+    """Allows the Frontend to add a new file path to the SIEM."""
+    data = await request.json()
+    new_path = data.get("path")
+    
+    if not new_path:
+        return {"status": "error", "message": "No path provided"}
+
+    # $addToSet ensures the path is added only if it's not already there (prevents duplicates)
+    """
+    By using the $addToSet operator in MongoDB, you are telling the database: "Keep all the previous paths, and if this new path doesn't already exist in the list, add it."
+    """
+    config_db.settings.update_one(
+        {"type": "watch_config"},
+        {"$addToSet": {"paths": new_path}}, 
+        upsert=True
+    )
+    
+    print(f"[*] New path added to monitoring: {new_path}")
+    return {"status": "success", "added": new_path}
 
 @app.get("/attack_summary")
 def attack_summary():
