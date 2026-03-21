@@ -39,54 +39,45 @@ def process_packet(packet, logs_col):
         now = datetime.datetime.utcnow()
         src_ip = packet[IP].src
         dst_ip = packet[IP].dst
-        proto_num = packet[IP].proto
-        proto_str = PROTO_MAP.get(proto_num, "other")
+        proto_str = PROTO_MAP.get(packet[IP].proto, "other")
         
-        # Initialize default values
-        state = "INT"  # Default for UDP
+        # --- 1. Initialize Dataset Attributes ---
+        state = "INT"  # Default for UDP/ICMP
         sbytes, dbytes = 0, 0
         sttl, dttl = 0, 0
         stcpb, dtcpb = 0, 0
+        synack, ackdat = 0, 0  # Initialize to 0 explicitly
         
-        # --- 1. Identify Flow & Direction ---
+        # --- 2. Identify Flow & Direction ---
         sport = packet[TCP].sport if packet.haslayer(TCP) else (packet[UDP].sport if packet.haslayer(UDP) else 0)
         dport = packet[TCP].dport if packet.haslayer(TCP) else (packet[UDP].dport if packet.haslayer(UDP) else 0)
         
         flow_key = tuple(sorted([(src_ip, sport), (dst_ip, dport)]))
         if flow_key not in sessions:
-            sessions[flow_key] = {
-                'start_time': now, 'last_packet_time': now,
-                'syn_time': None, 'synack_time': None,
-                'sbytes': 0, 'dbytes': 0
-            }
+            sessions[flow_key] = {'start_time': now, 'last_packet_time': now, 'syn_time': None, 'synack_time': None}
         session = sessions[flow_key]
 
-        # Determine if this is source -> destination (request) or vice versa
         is_request = dport in [80, 443, 8080] or proto_str == "udp"
 
-        # --- 2. State & TCP Specific Logic ---
+        # --- 3. Byte & TTL Logic (Works for TCP and UDP now) ---
+        if is_request:
+            sbytes = len(packet)
+            sttl = packet[IP].ttl
+        else:
+            dbytes = len(packet)
+            dttl = packet[IP].ttl
+
+        # --- 4. TCP Specific Logic (State & Timings) ---
         if packet.haslayer(TCP):
             flags = packet[TCP].flags
-            # Mapping Logic
-            if 'S' in flags and 'A' not in flags: 
-                state = "REQ"  # Connection Request
-            elif 'S' in flags and 'A' in flags: 
-                state = "CON"  # Connection Established (SYN-ACK)
-            elif 'F' in flags: 
-                state = "FIN"  # Finished (This fixes your "FA" issue)
-            elif 'R' in flags: 
-                state = "RST"  # Reset
-            elif 'A' in flags: 
-                state = "CON"  # Connected / Acknowledge    
+            if 'S' in flags and 'A' not in flags: state = "REQ"
+            elif 'S' in flags and 'A' in flags: state = "CON"
+            elif 'F' in flags: state = "FIN"
+            elif 'R' in flags: state = "RST"
+            elif 'A' in flags: state = "CON"
 
-            if is_request:
-                sbytes = len(packet)
-                sttl = packet[IP].ttl
-                stcpb = packet[TCP].seq
-            else:
-                dbytes = len(packet)
-                dttl = packet[IP].ttl
-                dtcpb = packet[TCP].seq
+            if is_request: stcpb = packet[TCP].seq
+            else: dtcpb = packet[TCP].seq
 
             # Handshake Timings
             if 'S' in flags and 'A' not in flags:
@@ -98,42 +89,37 @@ def process_packet(packet, logs_col):
             elif 'A' in flags and session['synack_time']:
                 ackdat = (now - session['synack_time']).total_seconds()
 
-        # --- 3. Inter-packet Times (sinpkt / dinpkt) ---
+        # --- 5. Inter-packet Times ---
         time_diff = (now - session['last_packet_time']).total_seconds()
         sinpkt = time_diff if is_request else 0
         dinpkt = time_diff if not is_request else 0
         session['last_packet_time'] = now
 
-        # --- 4. Final Log Construction (Dataset Schema) ---
+        # --- 6. Final Log Construction ---
         network_log = {
             "source": "network-interface",
             "timestamp": now,
-            "src_ip": src_ip,
-            "dst_ip": dst_ip,
-            "proto": proto_str,         # Dataset uses strings: 'tcp', 'udp'
-            "state": state,             # Dataset uses: 'REQ', 'CON', 'FIN', 'INT'
+            "src_ip": src_ip, "dst_ip": dst_ip,
+            "proto": proto_str,
+            "state": state,
             "service": SERVICE_MAP.get(dport if is_request else sport, "-"),
-            "sbytes": sbytes,           # Source bytes
-            "dbytes": dbytes,           # Destination bytes
-            "sttl": sttl,               # Source TTL
-            "dttl": dttl,               # Destination TTL
-            "stcpb": stcpb,             # Source TCP Base Sequence
-            "dtcpb": dtcpb,             # Destination TCP Base Sequence
-            "sinpkt": sinpkt,           # Source inter-packet time
-            "dinpkt": dinpkt,           # Destination inter-packet time
-            "synack": locals().get('synack', 0),
-            "ackdat": locals().get('ackdat', 0),
+            "sbytes": sbytes, "dbytes": dbytes,
+            "sttl": sttl, "dttl": dttl,
+            "stcpb": stcpb, "dtcpb": dtcpb,
+            "sinpkt": sinpkt, "dinpkt": dinpkt,
+            "synack": synack, "ackdat": ackdat,
             "is_sm_ips_ports": 1 if (src_ip == dst_ip and sport == dport) else 0,
             "processed": False
         }
 
-        # --- 5. Filtering and Shipping ---
-        # We only ship when a state change occurs or for UDP starts to save DB space
-        if state in ["REQ", "FIN", "RST", "INT"] and network_log["src_ip"] != "172.17.0.1":
+        # --- 7. Shipping ---
+        # Note: Added 'CON' to the filter if you want to see established connections
+        #if state in ["REQ", "FIN", "RST", "INT", "CON"] and network_log["src_ip"] != "172.17.0.1":
+        if state in ["REQ", "FIN", "RST", "INT", "CON"]:
             try:
-                logs_col.insert_one(network_log)
-            except Exception:
-                pass
+                if network_log.get("dst_port") != 27017:
+                    logs_col.insert_one(network_log)
+            except Exception: pass
 
 def start_network_sniffer(client):
     db = client.siem_db
