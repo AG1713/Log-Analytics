@@ -2,6 +2,26 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-border: hsl(var(--border));
+  --color-primary: hsl(var(--primary));
+  --color-muted: hsl(var(--muted));
+  --color-accent: hsl(var(--accent));
+  --color-destructive: hsl(var(--destructive));
+
+  --color-sidebar: hsl(var(--sidebar-background));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  /* --color-sidebar-accent: hsl(var(--sidebar-accent)); */
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+}
+
 @layer base {
   :root {
     --background: 214 35% 6%; /* #060d1a — your main bg */
@@ -35,14 +55,24 @@
     --radius: 0.5rem;
 
     /* Sidebar specifically */
-    --sidebar-background: 214 33% 8%; /* #080f1f — your sidebar bg */
-    --sidebar-foreground: 210 40% 93%;
-    --sidebar-primary: 191 100% 50%;
-    --sidebar-primary-foreground: 214 35% 6%;
-    --sidebar-accent: 214 30% 13%;
-    --sidebar-accent-foreground: 210 40% 93%;
-    --sidebar-border: 214 30% 12%;
-    --sidebar-ring: 191 100% 50%;
+    --sidebar-background: 214 33% 8%; /* slightly darker than bg, keep as-is */
+    --sidebar-foreground: var(--foreground);
+    --sidebar-primary: 191 60% 15%; /* darker, less saturated */
+    --sidebar-primary-foreground: 191 80% 80%; /* softer text */
+    --sidebar-accent: 214 30% 13%; /* hover — subtle highlight */
+    --sidebar-accent-foreground: var(--foreground);
+    --sidebar-border: var(--border);
+    --sidebar-ring: var(--ring);
+
+    /* Custom color palette */
+    --color-cyan: 191 100% 50%; /* #00d4ff */
+    --color-green: 152 69% 31%; /* #10b981 */
+    --color-red: 0 84% 60%; /* #ef4444 */
+    --color-amber: 38 92% 50%; /* #f59e0b */
+    --color-purple: 258 90% 66%; /* #8b5cf6 */
+    --color-blue: 189 85% 43%; /* #06b6d4 */
+    --color-orange: 25 95% 53%; /* #f97316 */
+    --color-muted-text: 210 20% 25%; /* #2a4a6a */
   }
 }
 
@@ -50,5 +80,10 @@
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
+  }
+
+  [data-sidebar="menu-button"][data-active="true"] {
+    background-color: hsl(var(--sidebar-primary));
+    color: hsl(var(--sidebar-primary-foreground));
   }
 }
