@@ -2,9 +2,16 @@ from fastapi import FastAPI, Request  # Added Request here
 from ml_service import generate_attack_summary
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient       # Added for Database connection
+import smtplib
+from email.mime.text import MIMEText
 
 app = FastAPI()
 
+# --- CONFIGURATION ---
+# Gmail Credentials (Use an App Password, not your regular password)
+GMAIL_USER = "your_actual_email@gmail.com" 
+GMAIL_APP_PASSWORD = "abcd efgh ijkl mnop" 
+VICTIM_EMAIL = "target_recipient@example.com"
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,6 +28,32 @@ app.add_middleware(
 # Initialize the connection once when the app starts
 client = MongoClient("mongodb://172.17.0.1:27017/")
 db = client.siem_db
+
+def send_email_notification(alert_type, file_path, severity):
+    subject = f"⚠️ SIEM ALERT: {alert_type}"
+    body = f"""
+    Security Alert Detected:
+    ------------------------
+    Event Type: {alert_type}
+    File Path:  {file_path}
+    Severity:   {severity}
+    Timestamp:  (Automatic Logged)
+    
+    Please investigate the server immediately.
+    """
+    
+    msg = MIMEText(body)
+    msg['Subject'] = subject
+    msg['From'] = GMAIL_USER
+    msg['To'] = VICTIM_EMAIL
+
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+            server.sendmail(GMAIL_USER, VICTIM_EMAIL, msg.as_string())
+        print(f"[+] Email alert sent to {VICTIM_EMAIL}")
+    except Exception as e:
+        print(f"[!] Email failed: {e}")
 
 @app.get("/attack_summary")
 def attack_summary():
@@ -49,6 +82,12 @@ async def receive_alert(request: Request):
     # 3. Insert into the 'alerts' collection
     result = db.alerts.insert_one(alert_data)
     
+    send_email_notification(
+        alert_data.get("type", "FIM_ALERT"),
+        alert_data.get("file", "Unknown"),
+        alert_data.get("severity", "High")
+    )
+
     print(f"[+] FIM Alert Received and Saved: {result.inserted_id}")
     return {"status": "success", "id": str(result.inserted_id)}
 
