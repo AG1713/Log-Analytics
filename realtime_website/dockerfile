@@ -5,10 +5,12 @@ FROM nginx:latest
 RUN apt update && apt-get install -y \
     python3 \
     python3-pip \
+    tcpdump \
+    libpcap-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install the MongoDB driver
-RUN pip3 install pymongo requests --break-system-packages
+RUN pip3 install pymongo requests scapy --break-system-packages
 
 # --- CRITICAL FIX: BREAK SYMBOLIC LINKS ---
 # By default, Nginx logs go to /dev/stdout. We need them in a REAL file 
