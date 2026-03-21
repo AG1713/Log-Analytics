@@ -6,14 +6,18 @@ import hashlib
 import requests
 import os
 import threading
+from scapy.all import sniff, IP, TCP
+import datetime
 
 # --- CONFIGURATION ---
 SIEM_DB_URL = "mongodb://172.17.0.1:27017/"
 # These are used only if the Backend API is unreachable
 DEFAULT_PATHS = ["/etc/nginx", "/var/www/html", "/root", "/var/log/nginx"] 
-CHECK_INTERVAL = 2 
+CHECK_INTERVAL = 10 
 BACKEND_URL = "http://172.17.0.1:8000/api/alerts"
 CONFIG_URL = "http://172.17.0.1:8000/api/config" # The new endpoint we added to main.py
+SERVICE_MAP = {80: "http", 443: "http", 53: "dns", 21: "ftp", 22: "ssh"}
+PROTO_MAP = {6: "tcp", 17: "udp", 1: "icmp"}
 
 def calculate_sha256(filepath):
     sha256_hash = hashlib.sha256()
@@ -25,6 +29,119 @@ def calculate_sha256(filepath):
         return sha256_hash.hexdigest()
     except (PermissionError, FileNotFoundError):
         return None
+
+# global session tracker to calculate timings and aggregates
+# Format: {(src, sport, dst, dport): {last_time: x, syn_time: y, ...}}
+sessions = {}
+
+def process_packet(packet, logs_col):
+    if packet.haslayer(IP):
+        now = datetime.datetime.utcnow()
+        src_ip = packet[IP].src
+        dst_ip = packet[IP].dst
+        proto_num = packet[IP].proto
+        proto_str = PROTO_MAP.get(proto_num, "other")
+        
+        # Initialize default values
+        state = "INT"  # Default for UDP
+        sbytes, dbytes = 0, 0
+        sttl, dttl = 0, 0
+        stcpb, dtcpb = 0, 0
+        
+        # --- 1. Identify Flow & Direction ---
+        sport = packet[TCP].sport if packet.haslayer(TCP) else (packet[UDP].sport if packet.haslayer(UDP) else 0)
+        dport = packet[TCP].dport if packet.haslayer(TCP) else (packet[UDP].dport if packet.haslayer(UDP) else 0)
+        
+        flow_key = tuple(sorted([(src_ip, sport), (dst_ip, dport)]))
+        if flow_key not in sessions:
+            sessions[flow_key] = {
+                'start_time': now, 'last_packet_time': now,
+                'syn_time': None, 'synack_time': None,
+                'sbytes': 0, 'dbytes': 0
+            }
+        session = sessions[flow_key]
+
+        # Determine if this is source -> destination (request) or vice versa
+        is_request = dport in [80, 443, 8080] or proto_str == "udp"
+
+        # --- 2. State & TCP Specific Logic ---
+        if packet.haslayer(TCP):
+            flags = packet[TCP].flags
+            # Mapping Logic
+            if 'S' in flags and 'A' not in flags: 
+                state = "REQ"  # Connection Request
+            elif 'S' in flags and 'A' in flags: 
+                state = "CON"  # Connection Established (SYN-ACK)
+            elif 'F' in flags: 
+                state = "FIN"  # Finished (This fixes your "FA" issue)
+            elif 'R' in flags: 
+                state = "RST"  # Reset
+            elif 'A' in flags: 
+                state = "CON"  # Connected / Acknowledge    
+
+            if is_request:
+                sbytes = len(packet)
+                sttl = packet[IP].ttl
+                stcpb = packet[TCP].seq
+            else:
+                dbytes = len(packet)
+                dttl = packet[IP].ttl
+                dtcpb = packet[TCP].seq
+
+            # Handshake Timings
+            if 'S' in flags and 'A' not in flags:
+                session['syn_time'] = now
+            elif 'S' in flags and 'A' in flags:
+                if session['syn_time']:
+                    synack = (now - session['syn_time']).total_seconds()
+                    session['synack_time'] = now
+            elif 'A' in flags and session['synack_time']:
+                ackdat = (now - session['synack_time']).total_seconds()
+
+        # --- 3. Inter-packet Times (sinpkt / dinpkt) ---
+        time_diff = (now - session['last_packet_time']).total_seconds()
+        sinpkt = time_diff if is_request else 0
+        dinpkt = time_diff if not is_request else 0
+        session['last_packet_time'] = now
+
+        # --- 4. Final Log Construction (Dataset Schema) ---
+        network_log = {
+            "source": "network-interface",
+            "timestamp": now,
+            "src_ip": src_ip,
+            "dst_ip": dst_ip,
+            "proto": proto_str,         # Dataset uses strings: 'tcp', 'udp'
+            "state": state,             # Dataset uses: 'REQ', 'CON', 'FIN', 'INT'
+            "service": SERVICE_MAP.get(dport if is_request else sport, "-"),
+            "sbytes": sbytes,           # Source bytes
+            "dbytes": dbytes,           # Destination bytes
+            "sttl": sttl,               # Source TTL
+            "dttl": dttl,               # Destination TTL
+            "stcpb": stcpb,             # Source TCP Base Sequence
+            "dtcpb": dtcpb,             # Destination TCP Base Sequence
+            "sinpkt": sinpkt,           # Source inter-packet time
+            "dinpkt": dinpkt,           # Destination inter-packet time
+            "synack": locals().get('synack', 0),
+            "ackdat": locals().get('ackdat', 0),
+            "is_sm_ips_ports": 1 if (src_ip == dst_ip and sport == dport) else 0,
+            "processed": False
+        }
+
+        # --- 5. Filtering and Shipping ---
+        # We only ship when a state change occurs or for UDP starts to save DB space
+        if state in ["REQ", "FIN", "RST", "INT"] and network_log["src_ip"] != "172.17.0.1":
+            try:
+                logs_col.insert_one(network_log)
+            except Exception:
+                pass
+
+def start_network_sniffer(client):
+    db = client.siem_db
+    logs_col = db.network_logs # New collection
+    print("[*] Network Sniffer active. Capturing traffic...")
+    
+    # Sniff packets (filter='tcp' or leave empty for all traffic)
+    sniff(prn=lambda pkt: process_packet(pkt, logs_col), store=0)
 
 def get_latest_watch_paths():
     """Fetches the current monitoring list from the Backend API."""
@@ -167,11 +284,18 @@ def main():
             print(f"[!] Connection failed: {e}. Retrying...")
             time.sleep(5)
 
-    # Start FIM in the background thread
+    # --- THREAD 1: FIM (File Integrity) ---
+    print("[*] Starting FIM Monitor Thread...")
     fim_thread = threading.Thread(target=run_fim_monitor, args=(client,), daemon=True)
     fim_thread.start()
 
-    # Start Log Shipper in the main thread
+    # --- THREAD 2: Network Sniffing ---
+    print("[*] Starting Network Sniffer Thread...")
+    net_thread = threading.Thread(target=start_network_sniffer, args=(client,), daemon=True)
+    net_thread.start()
+
+    # --- THREAD 3 (Main Thread): Log Shipping ---
+    # We keep this in the main thread so the script stays alive
     try:
         start_log_shipper(client)
     except KeyboardInterrupt:

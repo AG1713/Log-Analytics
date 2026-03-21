@@ -11,3 +11,6 @@ To test FIM
 1. docker exec -it real bash -c "echo 'CHANGE_TEST' >> /var/log/nginx/access.log"
 2. docker logs [realtime website container name] -f
 3. docker exec -it log-analytics-mongodb-1 mongo siem_db --eval 'db.alerts.find().pretty()'
+
+To test Whether network logs are going to mongo db
+docker exec -it log-analytics-mongodb-1 mongo siem_db --quiet --eval "db.network_logs.find().sort({timestamp: -1}).limit(5).pretty()"
