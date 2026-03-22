@@ -1,30 +1,39 @@
 # Use the official Nginx image
 FROM nginx:latest
 
-# Install Python and Pip for the Log Agent
+# 1. Install Python, Pip, SSH, and FTP services
 RUN apt update && apt-get install -y \
     python3 \
     python3-pip \
     tcpdump \
     libpcap-dev \
+    openssh-server \
+    vsftpd \
     && rm -rf /var/lib/apt/lists/*
 
-# Install the MongoDB driver
+# 3. Setup SSH and FTP runtime environments
+# Added -p to both so the build doesn't fail if they exist
+RUN mkdir -p /var/run/sshd && \
+    mkdir -p /var/run/vsftpd/empty
+
+# 3. Create a test user for your Brute-Force analysis
+# This creates a user 'admin' with password 'password123'
+RUN useradd -m admin && echo "admin:password123" | chpasswd
+
+# Install the MongoDB driver and dependencies
 RUN pip3 install pymongo requests scapy --break-system-packages
 
 # --- CRITICAL FIX: BREAK SYMBOLIC LINKS ---
-# By default, Nginx logs go to /dev/stdout. We need them in a REAL file 
-# so 'tail' in your agent.py can actually see the data.
 RUN unlink /var/log/nginx/access.log && \
     unlink /var/log/nginx/error.log && \
     touch /var/log/nginx/access.log && \
     touch /var/log/nginx/error.log && \
     chown nginx:nginx /var/log/nginx/*.log
 
-# Copy your website files to the Nginx html folder
+# Copy your website files
 COPY ./nonprofitwebsite /usr/share/nginx/html
 
-# Copy the agent script and a startup helper
+# Copy the agent script and startup helper
 COPY agent.py /usr/local/bin/agent.py
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
@@ -32,5 +41,9 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && \
     chmod +x /usr/local/bin/entrypoint.sh
 
-# Use the helper script to start both Nginx and the Agent
+# Allow local users to log in to FTP (Required for brute-force testing)
+RUN echo "local_enable=YES" >> /etc/vsftpd.conf && \
+    echo "chroot_local_user=YES" >> /etc/vsftpd.conf && \
+    echo "allow_writeable_chroot=YES" >> /etc/vsftpd.conf
+
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

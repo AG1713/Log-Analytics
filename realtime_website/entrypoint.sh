@@ -1,8 +1,13 @@
 #!/bin/bash
 
-# 1. Start the Python Log Agent in the BACKGROUND
-# The '&' is crucial here so the script continues to the next line
+echo "[*] Starting Security Services (SSH & FTP)..."
+service ssh start
+service vsftpd start
+
+echo "[*] Starting SIEM Log Agent..."
+# Start the agent in the background
 python3 -u /usr/local/bin/agent.py &
 
-# 2. Start Nginx in the FOREGROUND
-nginx -g "daemon off;"
+echo "[*] Launching Nginx Web Server..."
+# Start Nginx in the foreground so the container stays alive
+exec nginx -g "daemon off;"
