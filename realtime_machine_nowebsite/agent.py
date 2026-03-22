@@ -255,15 +255,15 @@ def start_log_shipper(client):
 
 
 def main():
-    # 1. First, check if we ALREADY have sniffing powers (via setcap or root)
+    # 1. First, check if we ALREADY have sniffing powers (Capabilities or Root)
     if check_permissions():
         print(f"[*] Permissions verified. Starting agent...")
     
     # 2. If no powers and NOT root, then try to elevate
     elif os.geteuid() != 0:
-        print(f"[*] SIEM Agent [{AGENT_HOSTNAME}] requires elevation.")
+        print(f"[*] SIEM Agent [{AGENT_HOSTNAME}] requires root privileges.")
         try:
-            # Use getpass to hide typing for security
+            # Use getpass to hide the password as you type
             user = getpass.getuser()
             pwd = getpass.getpass(prompt=f"[?] Enter sudo password for {user}: ")
             
@@ -275,7 +275,7 @@ def main():
             cmd = ["sudo", "-S", "python3"] + sys.argv
             proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, text=True)
             
-            # Send the password and close stdin
+            # Send the password to the sudo process
             proc.communicate(input=pwd + "\n")
             
             # The child process is now running; this parent process must exit
@@ -285,12 +285,12 @@ def main():
             print(f"[!] Authentication failed or error occurred: {e}")
             sys.exit(1)
 
-    # 3. Fallback: If we ARE root but check_permissions still failed (unlikely)
+    # 3. Fallback: If we ARE root but check_permissions still failed
     else:
-        print("[!] Fatal: Even as root, packet capture is unavailable.")
+        print("[!] Fatal: Even as root, packet capture is unavailable. Check kernel drivers.")
         sys.exit(1)
 
-    # --- ACTUAL AGENT LOGIC (Reached only if permissions are confirmed) ---
+    # --- ACTUAL AGENT LOGIC (Reached only by the permitted process) ---
     client = None
     while True:
         try:
@@ -300,9 +300,10 @@ def main():
             print("[+] Successfully connected!")
             break
         except Exception as e:
-            print(f"[!] Connection failed: {e}. Retrying in 5s...")
+            print(f"[!] Connection failed: {e}. Retrying...")
             time.sleep(5)
 
+    # Start Threads
     print("[*] Starting Security Threads...")
     threading.Thread(target=run_fim_monitor, args=(client,), daemon=True).start()
     threading.Thread(target=start_network_sniffer, args=(client,), daemon=True).start()
@@ -310,6 +311,7 @@ def main():
 
     print(f"[!] SIEM Agent [{AGENT_HOSTNAME}] is fully operational.")
     
+    # Keep main alive
     try:
         while True:
             time.sleep(1)

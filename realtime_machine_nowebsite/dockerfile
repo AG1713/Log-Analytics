@@ -1,0 +1,33 @@
+FROM ubuntu:latest
+
+# Install dependencies
+RUN apt update && apt-get install -y \
+    python3 \
+    python3-pip \
+    tcpdump \
+    libpcap-dev \
+    libcap2-bin \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create user AND set a password (change 'yourpassword' to what you want)
+RUN useradd -m temp_user && \
+    echo "temp_user:yourpassword" | chpasswd
+
+# Note: I removed NOPASSWD so it actually ASKS for the password now
+RUN echo "temp_user ALL=(ALL) ALL" >> /etc/sudoers
+
+# Install Python packages
+RUN pip3 install pymongo requests scapy --break-system-packages
+
+# Copy scripts
+COPY agent.py /usr/local/bin/agent.py
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+
+# Fix line endings and permissions
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && \
+    chmod +x /usr/local/bin/entrypoint.sh && \
+    chmod +x /usr/local/bin/agent.py
+
+USER temp_user
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
