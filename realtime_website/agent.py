@@ -19,7 +19,8 @@ BACKEND_URL = "http://172.17.0.1:8000/api/alerts"
 CONFIG_URL = "http://172.17.0.1:8000/api/config"
 SERVICE_MAP = {80: "http", 443: "http", 53: "dns", 21: "ftp", 22: "ssh"}
 PROTO_MAP = {6: "tcp", 17: "udp", 1: "icmp"}
-AGENT_HOSTNAME = os.getenv("AGENT_HOSTNAME") or os.uname()[1] or "unknown-host"
+# Swap the order: Check the Environment Variable FIRST
+AGENT_HOSTNAME = os.environ.get("AGENT_HOSTNAME") or os.uname()[1]
 
 def check_permissions():
     # Check if we are root
@@ -164,7 +165,11 @@ def run_fim_monitor(client):
                     baseline[full_path] = file_hash
                     hashes_col.update_one(
                         {"filepath": full_path},
-                        {"$set": {"hash": file_hash, "last_check": time.time()}},
+                        {"$set": {
+                            "hostname": AGENT_HOSTNAME, # Track which host owns this baseline
+                            "hash": file_hash, 
+                            "last_check": time.time()
+                        }},
                         upsert=True
                     )
     print(f"[+] FIM: Initial Baseline established for {len(baseline)} files.")
@@ -183,14 +188,26 @@ def run_fim_monitor(client):
                     if not current_hash: continue
 
                     if full_path not in baseline:
-                        alert = {"type": "FIM_NEW_FILE", "file": full_path, "severity": "medium"}
+                        # --- ADDED HOSTNAME HERE ---
+                        alert = {
+                            "hostname": AGENT_HOSTNAME, 
+                            "type": "FIM_NEW_FILE", 
+                            "file": full_path, 
+                            "severity": "medium"
+                        }
                         send_fim_alert(alert)
                         alerts_col.insert_one({**alert, "time": time.ctime(), "hash": current_hash})
                         baseline[full_path] = current_hash
                         hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}}, upsert=True)
 
                     elif current_hash != baseline[full_path]:
-                        alert = {"type": "FIM_MODIFICATION", "file": full_path, "severity": "high"}
+                        # --- ADDED HOSTNAME HERE ---
+                        alert = {
+                            "hostname": AGENT_HOSTNAME, 
+                            "type": "FIM_MODIFICATION", 
+                            "file": full_path, 
+                            "severity": "high"
+                        }
                         send_fim_alert(alert)
                         alerts_col.insert_one({
                             **alert, "time": time.ctime(), 
@@ -203,7 +220,13 @@ def run_fim_monitor(client):
         for path in baseline_paths:
             if path not in files_found_on_disk:
                 if any(path.startswith(watched) for watched in watch_list):
-                    alert = {"type": "FIM_DELETION", "file": path, "severity": "critical"}
+                    # --- ADDED HOSTNAME HERE ---
+                    alert = {
+                        "hostname": AGENT_HOSTNAME, 
+                        "type": "FIM_DELETION", 
+                        "file": path, 
+                        "severity": "critical"
+                    }
                     print(f"[!!] DELETION DETECTED: {path}")
                     send_fim_alert(alert)
                     alerts_col.insert_one({**alert, "time": time.ctime()})

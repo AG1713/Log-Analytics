@@ -32,6 +32,46 @@ client = MongoClient("mongodb://172.17.0.1:27017/")
 db = client.siem_db
 config_db = client.siem_config
 
+def find_duplicate_hostnames():
+    collection = db["network_logs"]
+
+    pipeline = [
+        {
+            # Group by hostname and unique IP
+            "$group": {
+                "_id": { "host": "$hostname", "ip": "$src_ip" },
+                "last_active": { "$max": "$timestamp" }
+            }
+        },
+        {
+            # Group by hostname to see how many IPs claimed it
+            "$group": {
+                "_id": "$_id.host",
+                "claiming_ips": { "$push": "$_id.ip" },
+                "count": { "$sum": 1 }
+            }
+        },
+        {
+            # Only return hostnames with more than 1 IP
+            "$match": { "count": { "$gt": 1 } }
+        }
+    ]
+
+    results = list(collection.aggregate(pipeline))
+    
+    # Add a "Recommendation" field for the Frontend
+    for res in results:
+        res["alert_message"] = f"CRITICAL: Hostname '{res['_id']}' is being used by {res['count']} different machines."
+        res["action_required"] = "CHANGE_HOSTNAME_IMMEDIATELY"
+        
+    return results
+
+@app.get("/api/check-duplicates")
+async def get_duplicates():
+    # Call the logic function and return the results directly
+    results = find_duplicate_hostnames() 
+    return results
+
 def send_email_notification(alert_type, file_path, severity):
     subject = f"⚠️ SIEM ALERT: {alert_type}"
     body = f"""
