@@ -5,9 +5,13 @@ service ssh start
 service vsftpd start
 
 echo "[*] Starting SIEM Log Agent..."
-# Start the agent in the background
-python3 -u /usr/local/bin/agent.py &
+# 1. Run the agent in the FOREGROUND first so it can take input
+# 2. We don't use & here because we need the keyboard connection
+python3 -u /usr/local/bin/agent.py 
+
+# NOTE: Your Python script uses sys.exit(proc.returncode) 
+# which might stop the script here. 
+# To keep the container alive, we use 'exec' for Nginx at the end.
 
 echo "[*] Launching Nginx Web Server..."
-# Start Nginx in the foreground so the container stays alive
 exec nginx -g "daemon off;"
