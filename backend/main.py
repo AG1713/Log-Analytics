@@ -201,6 +201,8 @@ async def get_network_logs(
 async def get_network_summary(hostname: str = Query(default=None)):
     query        = {"hostname": hostname} if hostname else {}
     pipeline_base = [{"$match": query}] if query else []
+
+    # The below are just MongoDB aggregate queries
     total = db.network_logs.count_documents(query)
     proto_counts = {
         d["_id"]: d["count"]
