@@ -19,7 +19,8 @@ BACKEND_URL = "http://172.17.0.1:8000/api/alerts"
 CONFIG_URL = "http://172.17.0.1:8000/api/config"
 SERVICE_MAP = {80: "http", 443: "http", 53: "dns", 21: "ftp", 22: "ssh"}
 PROTO_MAP = {6: "tcp", 17: "udp", 1: "icmp"}
-AGENT_HOSTNAME = os.getenv("AGENT_HOSTNAME") or os.uname()[1] or "unknown-host"
+# Swap the order: Check the Environment Variable FIRST
+AGENT_HOSTNAME = os.environ.get("AGENT_HOSTNAME") or os.uname()[1]
 
 def check_permissions():
     # Check if we are root
@@ -164,7 +165,11 @@ def run_fim_monitor(client):
                     baseline[full_path] = file_hash
                     hashes_col.update_one(
                         {"filepath": full_path},
-                        {"$set": {"hash": file_hash, "last_check": time.time()}},
+                        {"$set": {
+                            "hostname": AGENT_HOSTNAME, # Track which host owns this baseline
+                            "hash": file_hash, 
+                            "last_check": time.time()
+                        }},
                         upsert=True
                     )
     print(f"[+] FIM: Initial Baseline established for {len(baseline)} files.")
@@ -183,14 +188,26 @@ def run_fim_monitor(client):
                     if not current_hash: continue
 
                     if full_path not in baseline:
-                        alert = {"type": "FIM_NEW_FILE", "file": full_path, "severity": "medium"}
+                        # --- ADDED HOSTNAME HERE ---
+                        alert = {
+                            "hostname": AGENT_HOSTNAME, 
+                            "type": "FIM_NEW_FILE", 
+                            "file": full_path, 
+                            "severity": "medium"
+                        }
                         send_fim_alert(alert)
                         alerts_col.insert_one({**alert, "time": time.ctime(), "hash": current_hash})
                         baseline[full_path] = current_hash
                         hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}}, upsert=True)
 
                     elif current_hash != baseline[full_path]:
-                        alert = {"type": "FIM_MODIFICATION", "file": full_path, "severity": "high"}
+                        # --- ADDED HOSTNAME HERE ---
+                        alert = {
+                            "hostname": AGENT_HOSTNAME, 
+                            "type": "FIM_MODIFICATION", 
+                            "file": full_path, 
+                            "severity": "high"
+                        }
                         send_fim_alert(alert)
                         alerts_col.insert_one({
                             **alert, "time": time.ctime(), 
@@ -203,7 +220,13 @@ def run_fim_monitor(client):
         for path in baseline_paths:
             if path not in files_found_on_disk:
                 if any(path.startswith(watched) for watched in watch_list):
-                    alert = {"type": "FIM_DELETION", "file": path, "severity": "critical"}
+                    # --- ADDED HOSTNAME HERE ---
+                    alert = {
+                        "hostname": AGENT_HOSTNAME, 
+                        "type": "FIM_DELETION", 
+                        "file": path, 
+                        "severity": "critical"
+                    }
                     print(f"[!!] DELETION DETECTED: {path}")
                     send_fim_alert(alert)
                     alerts_col.insert_one({**alert, "time": time.ctime()})
@@ -255,15 +278,15 @@ def start_log_shipper(client):
 
 
 def main():
-    # 1. First, check if we ALREADY have sniffing powers (Capabilities or Root)
+    # 1. First, check if we ALREADY have sniffing powers (via setcap or root)
     if check_permissions():
         print(f"[*] Permissions verified. Starting agent...")
     
     # 2. If no powers and NOT root, then try to elevate
     elif os.geteuid() != 0:
-        print(f"[*] SIEM Agent [{AGENT_HOSTNAME}] requires root privileges.")
+        print(f"[*] SIEM Agent [{AGENT_HOSTNAME}] requires elevation.")
         try:
-            # Use getpass to hide the password as you type
+            # Use getpass to hide typing for security
             user = getpass.getuser()
             pwd = getpass.getpass(prompt=f"[?] Enter sudo password for {user}: ")
             
@@ -275,7 +298,7 @@ def main():
             cmd = ["sudo", "-S", "python3"] + sys.argv
             proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, text=True)
             
-            # Send the password to the sudo process
+            # Send the password and close stdin
             proc.communicate(input=pwd + "\n")
             
             # The child process is now running; this parent process must exit
@@ -285,12 +308,12 @@ def main():
             print(f"[!] Authentication failed or error occurred: {e}")
             sys.exit(1)
 
-    # 3. Fallback: If we ARE root but check_permissions still failed
+    # 3. Fallback: If we ARE root but check_permissions still failed (unlikely)
     else:
-        print("[!] Fatal: Even as root, packet capture is unavailable. Check kernel drivers.")
+        print("[!] Fatal: Even as root, packet capture is unavailable.")
         sys.exit(1)
 
-    # --- ACTUAL AGENT LOGIC (Reached only by the permitted process) ---
+    # --- ACTUAL AGENT LOGIC (Reached only if permissions are confirmed) ---
     client = None
     while True:
         try:
@@ -300,10 +323,9 @@ def main():
             print("[+] Successfully connected!")
             break
         except Exception as e:
-            print(f"[!] Connection failed: {e}. Retrying...")
+            print(f"[!] Connection failed: {e}. Retrying in 5s...")
             time.sleep(5)
 
-    # Start Threads
     print("[*] Starting Security Threads...")
     threading.Thread(target=run_fim_monitor, args=(client,), daemon=True).start()
     threading.Thread(target=start_network_sniffer, args=(client,), daemon=True).start()
@@ -311,7 +333,6 @@ def main():
 
     print(f"[!] SIEM Agent [{AGENT_HOSTNAME}] is fully operational.")
     
-    # Keep main alive
     try:
         while True:
             time.sleep(1)
@@ -320,5 +341,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
