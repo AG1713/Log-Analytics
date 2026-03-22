@@ -19,8 +19,6 @@ BACKEND_URL = "http://172.17.0.1:8000/api/alerts"
 CONFIG_URL = "http://172.17.0.1:8000/api/config"
 SERVICE_MAP = {80: "http", 443: "http", 53: "dns", 21: "ftp", 22: "ssh"}
 PROTO_MAP = {6: "tcp", 17: "udp", 1: "icmp"}
-# Swap the order: Check the Environment Variable FIRST
-AGENT_HOSTNAME = os.environ.get("AGENT_HOSTNAME") or os.uname()[1]
 
 def check_permissions():
     # Check if we are root
@@ -278,15 +276,33 @@ def start_log_shipper(client):
 
 
 def main():
-    # 1. First, check if we ALREADY have sniffing powers (via setcap or root)
+    global AGENT_HOSTNAME
+
+    # --- STEP 1: GET THE HOSTNAME ---
+    # We check if a name was passed as an argument (from the sudo restart).
+    # This prevents the "Double Prompt" on the Machine container.
+    if len(sys.argv) > 1:
+        AGENT_HOSTNAME = sys.argv[1]
+    else:
+        # This will run in the Website container OR the first run of the Machine container.
+        try:
+            AGENT_HOSTNAME = input("Enter The AGENT_HOSTNAME: ").strip()
+        except EOFError:
+            # Fallback if somehow run in background without a TTY
+            AGENT_HOSTNAME = os.uname()[1]
+            
+        if not AGENT_HOSTNAME:
+            AGENT_HOSTNAME = os.uname()[1]
+
+    # --- STEP 2: HANDLE PERMISSIONS & ELEVATION ---
     if check_permissions():
-        print(f"[*] Permissions verified. Starting agent...")
+        # This path is taken by the Website (Root) or the Machine (After Sudo)
+        print(f"[*] Permissions verified. Starting agent as [{AGENT_HOSTNAME}]...")
     
-    # 2. If no powers and NOT root, then try to elevate
     elif os.geteuid() != 0:
+        # This path is taken by the Machine container on the very first run
         print(f"[*] SIEM Agent [{AGENT_HOSTNAME}] requires elevation.")
         try:
-            # Use getpass to hide typing for security
             user = getpass.getuser()
             pwd = getpass.getpass(prompt=f"[?] Enter sudo password for {user}: ")
             
@@ -294,26 +310,24 @@ def main():
                 print("[!] No password provided. Exiting.")
                 sys.exit(1)
 
-            # Re-run the script with sudo -S (reads password from stdin)
-            cmd = ["sudo", "-S", "python3"] + sys.argv
+            # THE KEY: We pass AGENT_HOSTNAME as sys.argv[1] to the new process
+            cmd = ["sudo", "-S", "python3", sys.argv[0], AGENT_HOSTNAME]
             proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, text=True)
             
-            # Send the password and close stdin
+            # Send password to the sudo prompt
             proc.communicate(input=pwd + "\n")
             
-            # The child process is now running; this parent process must exit
+            # The original user process exits; the Root process takes over
             sys.exit(proc.returncode)
-            
         except Exception as e:
-            print(f"[!] Authentication failed or error occurred: {e}")
+            print(f"[!] Elevation failed: {e}")
             sys.exit(1)
-
-    # 3. Fallback: If we ARE root but check_permissions still failed (unlikely)
     else:
+        # Fallback for rare edge cases
         print("[!] Fatal: Even as root, packet capture is unavailable.")
         sys.exit(1)
 
-    # --- ACTUAL AGENT LOGIC (Reached only if permissions are confirmed) ---
+    # --- STEP 3: ACTUAL AGENT LOGIC (ROOT ONLY) ---
     client = None
     while True:
         try:
@@ -333,6 +347,29 @@ def main():
 
     print(f"[!] SIEM Agent [{AGENT_HOSTNAME}] is fully operational.")
     
+    # --- STEP 4: THE DAEMON HANDOFF ---
+    # --- STEP 4: THE DAEMON HANDOFF ---
+    if os.path.exists("/usr/sbin/nginx"):
+        print("[*] Handoff: Detaching SIEM agent to background...")
+        
+        try:
+            pid = os.fork()
+            if pid > 0:
+                # PARENT: Hard exit so Bash continues to Nginx immediately
+                os._exit(0) 
+            
+            # CHILD: We are now the background daemon
+            # Redirect standard streams to /dev/null so we don't mess up Nginx's logs
+            sys.stdout = open(os.devnull, 'w')
+            sys.stderr = open(os.devnull, 'w')
+            
+            while True:
+                time.sleep(60)
+        except OSError as e:
+            print(f"[!] Fork failed: {e}")
+            return # Fallback to foreground if fork fails
+    
+    # Machine mode / Foreground mode
     try:
         while True:
             time.sleep(1)
@@ -341,6 +378,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
