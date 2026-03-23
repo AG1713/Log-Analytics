@@ -103,6 +103,7 @@ def process_packet(packet, logs_col):
         dinpkt = time_diff if not is_request else 0
         session['last_packet_time'] = now
 
+
         # --- 1. CREATE DICTIONARY FIRST ---
         network_log = {
             "hostname": AGENT_HOSTNAME,
@@ -279,55 +280,36 @@ def main():
     global AGENT_HOSTNAME
 
     # --- STEP 1: GET THE HOSTNAME ---
-    # We check if a name was passed as an argument (from the sudo restart).
-    # This prevents the "Double Prompt" on the Machine container.
     if len(sys.argv) > 1:
         AGENT_HOSTNAME = sys.argv[1]
     else:
-        # This will run in the Website container OR the first run of the Machine container.
         try:
             AGENT_HOSTNAME = input("Enter The AGENT_HOSTNAME: ").strip()
         except EOFError:
-            # Fallback if somehow run in background without a TTY
             AGENT_HOSTNAME = os.uname()[1]
             
         if not AGENT_HOSTNAME:
             AGENT_HOSTNAME = os.uname()[1]
 
     # --- STEP 2: HANDLE PERMISSIONS & ELEVATION ---
-    if check_permissions():
-        # This path is taken by the Website (Root) or the Machine (After Sudo)
-        print(f"[*] Permissions verified. Starting agent as [{AGENT_HOSTNAME}]...")
-    
-    elif os.geteuid() != 0:
-        # This path is taken by the Machine container on the very first run
-        print(f"[*] SIEM Agent [{AGENT_HOSTNAME}] requires elevation.")
-        try:
-            user = getpass.getuser()
-            pwd = getpass.getpass(prompt=f"[?] Enter sudo password for {user}: ")
-            
-            if not pwd:
-                print("[!] No password provided. Exiting.")
+    if not check_permissions():
+        if os.geteuid() != 0:
+            print(f"[*] SIEM Agent [{AGENT_HOSTNAME}] requires elevation.")
+            try:
+                user = getpass.getuser()
+                pwd = getpass.getpass(prompt=f"[?] Enter sudo password for {user}: ")
+                cmd = ["sudo", "-S", "python3", sys.argv[0], AGENT_HOSTNAME]
+                proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, text=True)
+                proc.communicate(input=pwd + "\n")
+                sys.exit(proc.returncode)
+            except Exception as e:
+                print(f"[!] Elevation failed: {e}")
                 sys.exit(1)
-
-            # THE KEY: We pass AGENT_HOSTNAME as sys.argv[1] to the new process
-            cmd = ["sudo", "-S", "python3", sys.argv[0], AGENT_HOSTNAME]
-            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, text=True)
-            
-            # Send password to the sudo prompt
-            proc.communicate(input=pwd + "\n")
-            
-            # The original user process exits; the Root process takes over
-            sys.exit(proc.returncode)
-        except Exception as e:
-            print(f"[!] Elevation failed: {e}")
+        else:
+            print("[!] Fatal: Even as root, packet capture is unavailable.")
             sys.exit(1)
-    else:
-        # Fallback for rare edge cases
-        print("[!] Fatal: Even as root, packet capture is unavailable.")
-        sys.exit(1)
 
-    # --- STEP 3: ACTUAL AGENT LOGIC (ROOT ONLY) ---
+    # --- STEP 3: MONGODB CONNECTION ---
     client = None
     while True:
         try:
@@ -340,41 +322,36 @@ def main():
             print(f"[!] Connection failed: {e}. Retrying in 5s...")
             time.sleep(5)
 
-    print("[*] Starting Security Threads...")
+    # --- STEP 4: DAEMONIZE FIRST (FOR WEBSITE) ---
+    # We fork BEFORE starting threads to avoid the DeprecationWarning/Deadlock
+
+    if os.path.exists("/usr/sbin/nginx"):
+        pid = os.fork()
+        if pid > 0:
+            os._exit(0) # Parent dies, letting Nginx start
+            
+        # Child continues here...
+        sys.stdout = open(os.devnull, 'w')
+        sys.stderr = open(os.devnull, 'w')
+
+    # --- STEP 5: START THREADS (ONLY ONCE) ---
+    # This runs in the Child (Website) OR the Main Process (Machine)
     threading.Thread(target=run_fim_monitor, args=(client,), daemon=True).start()
     threading.Thread(target=start_network_sniffer, args=(client,), daemon=True).start()
     threading.Thread(target=start_log_shipper, args=(client,), daemon=True).start()
 
-    print(f"[!] SIEM Agent [{AGENT_HOSTNAME}] is fully operational.")
-    
-    # --- STEP 4: THE DAEMON HANDOFF ---
-    # --- STEP 4: THE DAEMON HANDOFF ---
-    if os.path.exists("/usr/sbin/nginx"):
-        print("[*] Handoff: Detaching SIEM agent to background...")
-        
+    # If we are NOT in the background (Machine mode), stay in foreground
+    if not os.path.exists("/usr/sbin/nginx"):
+        print(f"[!] SIEM Agent [{AGENT_HOSTNAME}] is fully operational.")
         try:
-            pid = os.fork()
-            if pid > 0:
-                # PARENT: Hard exit so Bash continues to Nginx immediately
-                os._exit(0) 
-            
-            # CHILD: We are now the background daemon
-            # Redirect standard streams to /dev/null so we don't mess up Nginx's logs
-            sys.stdout = open(os.devnull, 'w')
-            sys.stderr = open(os.devnull, 'w')
-            
             while True:
-                time.sleep(60)
-        except OSError as e:
-            print(f"[!] Fork failed: {e}")
-            return # Fallback to foreground if fork fails
-    
-    # Machine mode / Foreground mode
-    try:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n[!] Shutting down...")
+    else:
+        # In Website mode, the daemon just sleeps to keep threads alive
         while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\n[!] Shutting down...")
+            time.sleep(60)
 
 if __name__ == "__main__":
     main()
