@@ -13,7 +13,7 @@ import getpass
 
 # --- CONFIGURATION ---
 SIEM_DB_URL = "mongodb://172.17.0.1:27017/"
-DEFAULT_PATHS = ["/etc/nginx", "/var/www/html", "/root", "/var/log/nginx"] 
+DEFAULT_PATHS = ["/etc/nginx", "/var/www/html"] 
 CHECK_INTERVAL = 10 
 BACKEND_URL = "http://172.17.0.1:8000/api/alerts"
 CONFIG_URL = "http://172.17.0.1:8000/api/config"
@@ -45,6 +45,33 @@ def calculate_sha256(filepath):
         return sha256_hash.hexdigest()
     except (PermissionError, FileNotFoundError):
         return None
+
+def creating_hostname_collection(hostname, client):
+    db = client.siem_db
+    # We call the collection 'agents' or 'host_registry'
+    agents_col = db.agents 
+    
+    # Metadata to store about the host
+    host_data = {
+        "hostname": hostname,
+        "first_seen": datetime.now(timezone.utc),
+        "last_active": datetime.now(timezone.utc),
+        "status": "online"
+    }
+
+    try:
+        # 'upsert=True' is the key here: 
+        # It updates 'last_active' if host exists, 
+        # or inserts the whole 'host_data' if it's new.
+        agents_col.update_one(
+            {"hostname": hostname},
+            {"$set": {"last_active": datetime.now(timezone.utc)}, 
+             "$setOnInsert": {"first_seen": datetime.now(timezone.utc)}},
+            upsert=True
+        )
+        print(f"[+] Host [{hostname}] registered in siem_db.")
+    except Exception as e:
+        print(f"[!] Failed to register hostname: {e}")
 
 
 # Global dictionary to track active flows
@@ -307,24 +334,27 @@ def main():
     global AGENT_HOSTNAME
 
     # --- STEP 1: GET THE HOSTNAME ---
+    # Try arguments first, then manual input, then fallback to system hostname
     if len(sys.argv) > 1:
         AGENT_HOSTNAME = sys.argv[1]
     else:
         try:
             AGENT_HOSTNAME = input("Enter The AGENT_HOSTNAME: ").strip()
         except EOFError:
-            AGENT_HOSTNAME = os.uname()[1]
+            AGENT_HOSTNAME = socket.gethostname()
             
         if not AGENT_HOSTNAME:
-            AGENT_HOSTNAME = os.uname()[1]
+            AGENT_HOSTNAME = socket.gethostname()
 
     # --- STEP 2: HANDLE PERMISSIONS & ELEVATION ---
+    # Ensure we have the rights to sniff packets (requires root/cap_net_raw)
     if not check_permissions():
         if os.geteuid() != 0:
             print(f"[*] SIEM Agent [{AGENT_HOSTNAME}] requires elevation.")
             try:
                 user = getpass.getuser()
                 pwd = getpass.getpass(prompt=f"[?] Enter sudo password for {user}: ")
+                # Re-run the script with sudo
                 cmd = ["sudo", "-S", "python3", sys.argv[0], AGENT_HOSTNAME]
                 proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, text=True)
                 proc.communicate(input=pwd + "\n")
@@ -349,38 +379,50 @@ def main():
             print(f"[!] Connection failed: {e}. Retrying in 5s...")
             time.sleep(5)
 
-    # --- STEP 4: DAEMONIZE FIRST (FOR WEBSITE) ---
-    # We fork BEFORE starting threads to avoid the DeprecationWarning/Deadlock
+    # --- STEP 4: REGISTER HOSTNAME ---
+    # Do this before forking so the registry is updated immediately
+    creating_hostname_collection(AGENT_HOSTNAME, client)
 
+    # --- STEP 5: DAEMONIZE FOR WEBSITE MODE ---
+    # If Nginx is present, we fork to run the agent as a background daemon
     if os.path.exists("/usr/sbin/nginx"):
+        print("[*] Launching Nginx and backgrounding SIEM Agent...")
         pid = os.fork()
         if pid > 0:
-            os._exit(0) # Parent dies, letting Nginx start
+            # Parent process: Exits so the Docker entrypoint continues to Nginx
+            return 
             
-        # Child continues here...
+        # Child process: Continues as the background SIEM agent
+        # Redirect standard IO to avoid cluttering the Nginx logs
         sys.stdout = open(os.devnull, 'w')
         sys.stderr = open(os.devnull, 'w')
 
-    # --- STEP 5: START THREADS (ONLY ONCE) ---
-    # This runs in the Child (Website) OR the Main Process (Machine)
-    threading.Thread(target=run_fim_monitor, args=(client,), daemon=True).start()
-    threading.Thread(target=start_network_sniffer, args=(client,), daemon=True).start()
-    threading.Thread(target=start_log_shipper, args=(client,), daemon=True).start()
+    # --- STEP 6: START MONITORING THREADS ---
+    # We use a list to keep track of our security modules
+    security_modules = [
+        (run_fim_monitor, "FIM Integrity Watcher"),
+        (start_network_sniffer, "Flow Aggregator (Network)"),
+        (start_log_shipper, "Log Shipper (Nginx/Syslog)")
+    ]
 
-    # If we are NOT in the background (Machine mode), stay in foreground
+    for target_func, name in security_modules:
+        thread = threading.Thread(target=target_func, args=(client,), daemon=True)
+        thread.start()
+        # Note: If backgrounded, these prints go to devnull
+        print(f"[+] Started {name} thread.")
+
+    # --- STEP 7: KEEP-ALIVE LOOP ---
     if not os.path.exists("/usr/sbin/nginx"):
-        print(f"[!] SIEM Agent [{AGENT_HOSTNAME}] is fully operational.")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("\n[!] Shutting down...")
-    else:
-        # In Website mode, the daemon just sleeps to keep threads alive
+        print(f"--- SIEM Agent [{AGENT_HOSTNAME}] is fully operational ---")
+    
+    try:
         while True:
-            time.sleep(60)
+            # You could add a 'heartbeat' here to update 'last_active' in MongoDB
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[!] Shutdown signal received. Closing Agent...")
+        client.close()
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
-
-
