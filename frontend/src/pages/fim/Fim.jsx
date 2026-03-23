@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-
-const BASE = "http://localhost:8000";
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "../../lib/api";
 
 const COLORS = {
   bg:     "#060d1a",
@@ -28,15 +28,14 @@ const TYPE_META = {
   FIM_NEW_FILE:     { label: "New File", color: "#06b6d4", accent: "#06b6d422" },
 };
 
-// Common Linux paths tree
 const PATH_TREE = [
   {
     label: "etc", path: "/etc", children: [
-      { label: "nginx", path: "/etc/nginx" },
+      { label: "nginx",   path: "/etc/nginx" },
       { label: "apache2", path: "/etc/apache2" },
-      { label: "ssh", path: "/etc/ssh" },
-      { label: "cron.d", path: "/etc/cron.d" },
-      { label: "passwd", path: "/etc/passwd" },
+      { label: "ssh",     path: "/etc/ssh" },
+      { label: "cron.d",  path: "/etc/cron.d" },
+      { label: "passwd",  path: "/etc/passwd" },
     ]
   },
   {
@@ -48,35 +47,34 @@ const PATH_TREE = [
       },
       {
         label: "log", path: "/var/log", children: [
-          { label: "nginx", path: "/var/log/nginx" },
-          { label: "apache2", path: "/var/log/apache2" },
+          { label: "nginx",    path: "/var/log/nginx" },
+          { label: "apache2",  path: "/var/log/apache2" },
           { label: "auth.log", path: "/var/log/auth.log" },
-          { label: "syslog", path: "/var/log/syslog" },
+          { label: "syslog",   path: "/var/log/syslog" },
         ]
       },
     ]
   },
   {
     label: "root", path: "/root", children: [
-      { label: ".ssh", path: "/root/.ssh" },
+      { label: ".ssh",    path: "/root/.ssh" },
       { label: ".bashrc", path: "/root/.bashrc" },
     ]
   },
   {
     label: "home", path: "/home", children: [
-      { label: "ubuntu", path: "/home/ubuntu" },
+      { label: "ubuntu",   path: "/home/ubuntu" },
       { label: "www-data", path: "/home/www-data" },
     ]
   },
   {
     label: "usr", path: "/usr", children: [
       { label: "local/bin", path: "/usr/local/bin" },
-      { label: "share", path: "/usr/share" },
+      { label: "share",     path: "/usr/share" },
     ]
   },
 ];
 
-// --- Sub-components ---
 const Card = ({ children, style = {} }) => (
   <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: "9px", padding: "16px", ...style }}>
     {children}
@@ -96,7 +94,6 @@ const SeverityDot = ({ severity }) => (
   </span>
 );
 
-// Tree Node component
 const TreeNode = ({ node, depth = 0, monitoredPaths, onAdd }) => {
   const [open, setOpen] = useState(false);
   const isMonitored = monitoredPaths.includes(node.path);
@@ -115,40 +112,25 @@ const TreeNode = ({ node, depth = 0, monitoredPaths, onAdd }) => {
         }}
         onClick={() => hasChildren && setOpen(o => !o)}
       >
-        {/* Expand arrow */}
         <span style={{ fontSize: "9px", color: COLORS.muted, width: "10px", flexShrink: 0 }}>
           {hasChildren ? (open ? "▼" : "▶") : ""}
         </span>
-
-        {/* Icon */}
         <span style={{ fontSize: "11px" }}>{hasChildren ? "📁" : "📄"}</span>
-
-        {/* Label */}
         <span style={{ fontSize: "11px", color: isMonitored ? COLORS.cyan : COLORS.text, fontFamily: "monospace", flex: 1 }}>
           {node.label}
         </span>
-
-        {/* Add button */}
         {!isMonitored && (
           <button
             onClick={e => { e.stopPropagation(); onAdd(node.path); }}
-            style={{
-              fontSize: "10px", padding: "1px 7px", borderRadius: "4px",
-              border: `1px solid ${COLORS.cyan}44`, background: `${COLORS.cyan}11`,
-              color: COLORS.cyan, cursor: "pointer", opacity: 0.7,
-            }}
+            style={{ fontSize: "10px", padding: "1px 7px", borderRadius: "4px", border: `1px solid ${COLORS.cyan}44`, background: `${COLORS.cyan}11`, color: COLORS.cyan, cursor: "pointer", opacity: 0.7 }}
           >
             + Add
           </button>
         )}
-
-        {/* Already monitored badge */}
         {isMonitored && (
           <span style={{ fontSize: "9px", color: COLORS.cyan, opacity: 0.7 }}>● watching</span>
         )}
       </div>
-
-      {/* Children */}
       {open && hasChildren && node.children.map((child, i) => (
         <TreeNode key={i} node={child} depth={depth + 1} monitoredPaths={monitoredPaths} onAdd={onAdd} />
       ))}
@@ -156,96 +138,82 @@ const TreeNode = ({ node, depth = 0, monitoredPaths, onAdd }) => {
   );
 };
 
-// --- Main Component ---
 export default function Fim() {
-  const [alerts, setAlerts]         = useState([]);
-  const [paths, setPaths]           = useState([]);
-  const [devices, setDevices]       = useState([]);
+  const queryClient = useQueryClient();
+
   const [selectedDevice, setSelectedDevice] = useState(null);
-  const [newPath, setNewPath]       = useState("");
-  const [loading, setLoading]       = useState(true);
-  const [addingPath, setAddingPath] = useState(false);
-  const [pathMsg, setPathMsg]       = useState(null);
-  const [filter, setFilter]         = useState("ALL");
+  const [newPath, setNewPath]               = useState("");
+  const [filter, setFilter]                 = useState("ALL");
+  const [pathMsg, setPathMsg]               = useState(null);
 
-  const fetchData = async (hostname = selectedDevice) => {
-    try {
-      const params = hostname ? `?hostname=${hostname}` : "";
-      const [alertsRes, configRes, devicesRes] = await Promise.all([
-        fetch(`${BASE}/api/alerts${params}`),
-        fetch(`${BASE}/api/config${params}`),
-        fetch(`${BASE}/api/devices`),
-      ]);
-      const alertsData  = await alertsRes.json();
-      const configData  = await configRes.json();
-      const devicesData = await devicesRes.json();
-      setAlerts(alertsData);
-      setPaths(configData.paths || []);
-      setDevices(devicesData.devices || []);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // --- Queries ---
+  const { data: alertsData = [], isLoading: alertsLoading } = useQuery({
+    queryKey: ["alerts", selectedDevice],
+    queryFn:  () => api.fetchAlerts(selectedDevice),
+    refetchInterval: 10000,
+  });
 
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(() => fetchData(), 10000);
-    return () => clearInterval(interval);
-  }, [selectedDevice]);
+  const { data: configData, isLoading: configLoading } = useQuery({
+    queryKey: ["config", selectedDevice],
+    queryFn:  () => api.fetchConfig(selectedDevice),
+    refetchInterval: 10000,
+  });
 
-  const handleAddPath = async (pathToAdd = null) => {
-    const p = pathToAdd || newPath.trim();
-    if (!p) return;
-    setAddingPath(true);
-    setPathMsg(null);
-    try {
-      const res = await fetch(`${BASE}/api/add_path`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: p, hostname: selectedDevice }),
-      });
-      const data = await res.json();
+  const { data: devicesData } = useQuery({
+    queryKey: ["devices"],
+    queryFn:  api.fetchDevices,
+    refetchInterval: 30000,
+  });
+
+  const alerts  = alertsData || [];
+  const paths   = configData?.paths   || [];
+  const devices = devicesData?.devices || [];
+  const loading = alertsLoading || configLoading;
+
+  // --- Mutations ---
+  const addPathMutation = useMutation({
+    mutationFn: ({ path, hostname }) => api.addPath(path, hostname),
+    onSuccess: (data) => {
       if (data.status === "success") {
         setPathMsg({ type: "success", text: `Added: ${data.added}` });
         setNewPath("");
-        fetchData();
+        setTimeout(() => setPathMsg(null), 3000);
       } else {
         setPathMsg({ type: "error", text: data.message || "Failed" });
       }
-    } catch {
-      setPathMsg({ type: "error", text: "Request failed" });
-    } finally {
-      setAddingPath(false);
-      setTimeout(() => setPathMsg(null), 3000);
-    }
+      queryClient.invalidateQueries({ queryKey: ["config"] });
+    },
+    onError: () => setPathMsg({ type: "error", text: "Request failed" }),
+  });
+
+  const removePathMutation = useMutation({
+    mutationFn: ({ path, hostname }) => api.removePath(path, hostname),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["config"] }),
+  });
+
+  const deleteAlertMutation = useMutation({
+    mutationFn: (id) => api.deleteAlert(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["alerts"] }),
+  });
+
+  const clearAlertsMutation = useMutation({
+    mutationFn: () => api.clearAlerts(selectedDevice),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["alerts"] }),
+  });
+
+  // --- Handlers ---
+  const handleAddPath    = (pathToAdd = null) => {
+    const p = pathToAdd || newPath.trim();
+    if (!p) return;
+    addPathMutation.mutate({ path: p, hostname: selectedDevice });
   };
+  const handleRemovePath  = (path) => removePathMutation.mutate({ path, hostname: selectedDevice });
+  const handleDeleteAlert = (id)   => deleteAlertMutation.mutate(id);
+  const handleClearAlerts = ()     => clearAlertsMutation.mutate();
 
-  const handleDeleteAlert = async (id) => {
-    await fetch(`${BASE}/api/alerts/${id}`, { method: "DELETE" });
-    fetchData();
-  };
-
-  const handleClearAlerts = async () => {
-    const params = selectedDevice ? `?hostname=${selectedDevice}` : "";
-    await fetch(`${BASE}/api/alerts${params}`, { method: "DELETE" });
-    fetchData();
-  };
-
-  const handleRemovePath = async (path) => {
-    await fetch(`${BASE}/api/config/path`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, hostname: selectedDevice }),
-    });
-    fetchData();
-  };
-
-  const totalModified = alerts.filter(a => a.type === "FIM_MODIFICATION").length;
-  const totalDeleted  = alerts.filter(a => a.type === "FIM_DELETION").length;
-  const totalNew      = alerts.filter(a => a.type === "FIM_NEW_FILE").length;
-
+  const totalModified  = alerts.filter(a => a.type === "FIM_MODIFICATION").length;
+  const totalDeleted   = alerts.filter(a => a.type === "FIM_DELETION").length;
+  const totalNew       = alerts.filter(a => a.type === "FIM_NEW_FILE").length;
   const filteredAlerts = filter === "ALL" ? alerts : alerts.filter(a => a.type === filter);
 
   if (loading) return (
@@ -275,7 +243,7 @@ export default function Fim() {
             Clear Alerts
           </button>
           <button
-            onClick={() => fetchData()}
+            onClick={() => queryClient.invalidateQueries({ queryKey: ["alerts"] })}
             style={{ padding: "5px 14px", borderRadius: "6px", border: `1px solid ${COLORS.cyan}33`, background: `${COLORS.cyan}11`, fontSize: "12px", color: COLORS.cyan, cursor: "pointer" }}
           >
             Refresh
@@ -321,10 +289,10 @@ export default function Fim() {
       {/* Stat Cards */}
       <div className="grid grid-cols-4 gap-3 mb-4">
         {[
-          { label: "TOTAL ALERTS",  value: alerts.length,  accent: COLORS.cyan },
-          { label: "MODIFICATIONS", value: totalModified,   accent: COLORS.amber },
-          { label: "DELETIONS",     value: totalDeleted,    accent: COLORS.red,  alert: true },
-          { label: "NEW FILES",     value: totalNew,        accent: COLORS.blue },
+          { label: "TOTAL ALERTS",  value: alerts.length, accent: COLORS.cyan },
+          { label: "MODIFICATIONS", value: totalModified,  accent: COLORS.amber },
+          { label: "DELETIONS",     value: totalDeleted,   accent: COLORS.red,  alert: true },
+          { label: "NEW FILES",     value: totalNew,       accent: COLORS.blue },
         ].map(card => (
           <div key={card.label} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: "9px", padding: "14px", position: "relative", overflow: "hidden" }}>
             <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "2px", background: card.accent }} />
@@ -338,8 +306,6 @@ export default function Fim() {
 
       {/* Middle Row: Paths + Tree Explorer */}
       <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
-
-        {/* Monitored Paths */}
         <Card>
           <CardLabel>MONITORED PATHS {selectedDevice && `— ${selectedDevice}`}</CardLabel>
           <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginBottom: "12px" }}>
@@ -358,8 +324,6 @@ export default function Fim() {
               </div>
             ))}
           </div>
-
-          {/* Manual Add */}
           <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: "12px" }}>
             <div style={{ fontSize: "10px", color: COLORS.muted, letterSpacing: "0.07em", marginBottom: "8px" }}>ADD MANUALLY</div>
             <div style={{ display: "flex", gap: "6px" }}>
@@ -372,10 +336,10 @@ export default function Fim() {
               />
               <button
                 onClick={() => handleAddPath()}
-                disabled={addingPath}
-                style={{ padding: "6px 12px", borderRadius: "6px", border: `1px solid ${COLORS.cyan}33`, background: `${COLORS.cyan}11`, color: COLORS.cyan, fontSize: "12px", cursor: "pointer", opacity: addingPath ? 0.5 : 1 }}
+                disabled={addPathMutation.isPending}
+                style={{ padding: "6px 12px", borderRadius: "6px", border: `1px solid ${COLORS.cyan}33`, background: `${COLORS.cyan}11`, color: COLORS.cyan, fontSize: "12px", cursor: "pointer", opacity: addPathMutation.isPending ? 0.5 : 1 }}
               >
-                {addingPath ? "..." : "Add"}
+                {addPathMutation.isPending ? "..." : "Add"}
               </button>
             </div>
             {pathMsg && (
@@ -386,7 +350,6 @@ export default function Fim() {
           </div>
         </Card>
 
-        {/* Tree Explorer */}
         <Card>
           <CardLabel>BROWSE & ADD PATHS</CardLabel>
           <div style={{ fontSize: "10px", color: COLORS.muted, marginBottom: "10px" }}>
@@ -395,13 +358,7 @@ export default function Fim() {
           <div style={{ overflow: "auto", maxHeight: "260px" }}>
             <div style={{ fontFamily: "monospace" }}>
               {PATH_TREE.map((node, i) => (
-                <TreeNode
-                  key={i}
-                  node={node}
-                  depth={0}
-                  monitoredPaths={paths}
-                  onAdd={handleAddPath}
-                />
+                <TreeNode key={i} node={node} depth={0} monitoredPaths={paths} onAdd={handleAddPath} />
               ))}
             </div>
           </div>

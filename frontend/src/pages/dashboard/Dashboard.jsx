@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../../lib/api";
 import {
   PieChart, Pie, Cell, Tooltip, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, ResponsiveContainer
@@ -6,18 +8,18 @@ import {
 
 // --- Constants ---
 const COLORS = {
-  bg:       "#060d1a",
-  card:     "#0d1626",
-  border:   "#0f1e36",
-  text:     "#e2f0ff",
-  muted:    "#2a4a6a",
-  cyan:     "#00d4ff",
-  green:    "#10b981",
-  red:      "#ef4444",
-  amber:    "#f59e0b",
-  purple:   "#8b5cf6",
-  blue:     "#06b6d4",
-  orange:   "#f97316",
+  bg:     "#060d1a",
+  card:   "#0d1626",
+  border: "#0f1e36",
+  text:   "#e2f0ff",
+  muted:  "#2a4a6a",
+  cyan:   "#00d4ff",
+  green:  "#10b981",
+  red:    "#ef4444",
+  amber:  "#f59e0b",
+  purple: "#8b5cf6",
+  blue:   "#06b6d4",
+  orange: "#f97316",
 };
 
 const ATTACK_COLORS = {
@@ -40,28 +42,22 @@ const SEVERITY_COLORS = {
   normal:   COLORS.muted,
 };
 
+const PROTO_STYLE = {
+  tcp:  { bg: "#06b6d422", color: "#06b6d4", border: "#06b6d433" },
+  udp:  { bg: "#8b5cf622", color: "#8b5cf6", border: "#8b5cf633" },
+  icmp: { bg: "#f59e0b22", color: "#f59e0b", border: "#f59e0b33" },
+};
+
 const tooltipStyle = {
-  contentStyle: {
-    background: "#0d1626",
-    border: "1px solid #1a2d4a",
-    borderRadius: "6px",
-    color: "#e2f0ff",
-    fontSize: "12px",
-  },
-  itemStyle: { color: "#e2f0ff" },    // ← this fixes the black text
-  labelStyle: { color: "#2a4a6a" },
-  cursor: { fill: "#ffffff08" },
+  contentStyle: { background: "#0d1626", border: "1px solid #1a2d4a", borderRadius: "6px", color: "#e2f0ff", fontSize: "12px" },
+  itemStyle:    { color: "#e2f0ff" },
+  labelStyle:   { color: "#2a4a6a" },
+  cursor:       { fill: "#ffffff08" },
 };
 
 // --- Sub-components ---
 const Card = ({ children, style = {} }) => (
-  <div style={{
-    background: COLORS.card,
-    border: `1px solid ${COLORS.border}`,
-    borderRadius: "9px",
-    padding: "16px",
-    ...style,
-  }}>
+  <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: "9px", padding: "16px", ...style }}>
     {children}
   </div>
 );
@@ -73,14 +69,7 @@ const CardLabel = ({ children }) => (
 );
 
 const StatCard = ({ label, value, accent, sub, alert }) => (
-  <div style={{
-    background: COLORS.card,
-    border: `1px solid ${COLORS.border}`,
-    borderRadius: "9px",
-    padding: "14px",
-    position: "relative",
-    overflow: "hidden",
-  }}>
+  <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: "9px", padding: "14px", position: "relative", overflow: "hidden" }}>
     <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "2px", background: accent }} />
     <div style={{ fontSize: "10px", color: COLORS.muted, letterSpacing: "0.07em", marginBottom: "10px" }}>{label}</div>
     <div style={{ fontSize: "26px", fontWeight: 700, fontFamily: "monospace", color: alert ? COLORS.red : COLORS.text, marginBottom: "4px" }}>
@@ -97,35 +86,72 @@ const SeverityDot = ({ severity }) => (
   </span>
 );
 
+const ProtoBadge = ({ proto }) => {
+  const s = PROTO_STYLE[proto] || { bg: "#ffffff11", color: COLORS.muted, border: "#ffffff22" };
+  return (
+    <span style={{ padding: "2px 6px", borderRadius: "3px", fontSize: "10px", background: s.bg, color: s.color, border: `1px solid ${s.border}`, textTransform: "uppercase" }}>
+      {proto || "—"}
+    </span>
+  );
+};
+
 // --- Main Component ---
 export default function Dashboard() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  // All hooks at the top — before any early returns
+  const [showNetworkLogs, setShowNetworkLogs] = useState(false);
+  const [networkLogs, setNetworkLogs]         = useState([]);
+  const [selectedDevice, setSelectedDevice]   = useState(null);
 
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ["attackSummary"],
+    queryFn:  api.fetchAttackSummary,
+  });
+
+  const { data: devicesData } = useQuery({
+    queryKey: ["devices"],
+    queryFn:  api.fetchDevices,
+    staleTime: 30000,
+  });
+  const devices = devicesData?.devices || [];
+
+  // SSE for live network logs
   useEffect(() => {
-    fetch("http://localhost:8000/attack_summary")
-      .then(res => {
-        if (!res.ok) throw new Error("Failed to fetch");
-        return res.json();
-      })
-      .then(json => { setData(json); setLoading(false); })
-      .catch(err => { setError(err.message); setLoading(false); });
-  }, []);
+    if (!showNetworkLogs) {
+      setNetworkLogs([]); // clear on toggle off
+      return;
+    }
 
-  if (loading) return (
+    setNetworkLogs([]) // clearing the network logs once host name changes (without this, it was just adding rows)
+
+    const params = selectedDevice ? `?hostname=${selectedDevice}` : "";
+    const es = new EventSource(`http://localhost:8000/api/network/stream${params}`);
+
+    es.onmessage = (e) => {
+      try {
+        const incoming = JSON.parse(e.data);
+        if (!Array.isArray(incoming) || incoming.error) return;
+        setNetworkLogs(prev => [...incoming, ...prev].slice(0, 100));
+      } catch {}
+    };
+
+    es.onerror = () => es.close();
+    return () => es.close();
+  }, [showNetworkLogs, selectedDevice]);
+
+  // Early returns after all hooks
+  if (isLoading) return (
     <div style={{ background: COLORS.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontFamily: "monospace", fontSize: "13px" }}>
       LOADING...
     </div>
   );
 
-  if (error) return (
+  if (isError) return (
     <div style={{ background: COLORS.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.red, fontFamily: "monospace", fontSize: "13px" }}>
-      ERROR: {error}
+      ERROR: {error.message}
     </div>
   );
 
-  // --- Transform API data for charts ---
+  // Transform API data for charts
   const attackDistData = Object.entries(data.attack_distribution).map(([name, value]) => ({
     name, value, color: ATTACK_COLORS[name] || COLORS.muted,
   }));
@@ -146,9 +172,8 @@ export default function Dashboard() {
     name, value,
   }));
 
-  const attackRate = ((data.total_attacks / data.total_records) * 100).toFixed(1);
+  const attackRate    = ((data.total_attacks / data.total_records) * 100).toFixed(1);
   const criticalCount = data.severity_distribution?.critical || 0;
-  const wormCount = data.attack_distribution?.Worms || 0;
 
   return (
     <div style={{ background: COLORS.bg, color: COLORS.text, padding: "24px 28px", flex: 1 }}>
@@ -170,24 +195,16 @@ export default function Dashboard() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-4 gap-3 mb-4">
-        <StatCard label="TOTAL RECORDS"  value={data.total_records}  accent={COLORS.blue}   sub="From testing dataset" />
-        <StatCard label="TOTAL ATTACKS"  value={data.total_attacks}  accent={COLORS.red}    sub={`${attackRate}% of total traffic`} alert />
-        <StatCard label="CRITICAL EVENTS" value={criticalCount}      accent={COLORS.orange} sub="Worms, Backdoors, Shellcode" alert />
-        <StatCard label="NORMAL TRAFFIC" value={data.total_normal}   accent={COLORS.green}  sub={`${(100 - parseFloat(attackRate)).toFixed(1)}% of total`} />
+        <StatCard label="TOTAL RECORDS"   value={data.total_records}  accent={COLORS.blue}   sub="From testing dataset" />
+        <StatCard label="TOTAL ATTACKS"   value={data.total_attacks}  accent={COLORS.red}    sub={`${attackRate}% of total traffic`} alert />
+        <StatCard label="CRITICAL EVENTS" value={criticalCount}       accent={COLORS.orange} sub="Worms, Backdoors, Shellcode" alert />
+        <StatCard label="NORMAL TRAFFIC"  value={data.total_normal}   accent={COLORS.green}  sub={`${(100 - parseFloat(attackRate)).toFixed(1)}% of total`} />
       </div>
 
       {/* Severity Cards */}
       <div className="grid grid-cols-4 gap-3 mb-4">
         {["critical", "high", "medium", "low"].map(sev => (
-          <div key={sev} style={{
-            background: `${SEVERITY_COLORS[sev]}0d`,
-            border: `1px solid ${SEVERITY_COLORS[sev]}30`,
-            borderRadius: "9px",
-            padding: "12px 14px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}>
+          <div key={sev} style={{ background: `${SEVERITY_COLORS[sev]}0d`, border: `1px solid ${SEVERITY_COLORS[sev]}30`, borderRadius: "9px", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: "11px", color: SEVERITY_COLORS[sev], textTransform: "uppercase", letterSpacing: "0.06em" }}>{sev}</span>
             <span style={{ fontSize: "20px", fontWeight: 700, fontFamily: "monospace", color: SEVERITY_COLORS[sev] }}>
               {(data.severity_distribution?.[sev] || 0).toLocaleString()}
@@ -196,13 +213,11 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Charts Row 1: Donut + Protocol + Service */}
+      {/* Charts Row 1 */}
       <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
-
-        {/* Attack Distribution Donut */}
         <Card>
           <CardLabel>ATTACK DISTRIBUTION</CardLabel>
-          <ResponsiveContainer width="100%" height={180} debounce={200}>
+          <ResponsiveContainer width="100%" height={180} debounce={300}>
             <PieChart>
               <Pie data={attackDistData} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={2} dataKey="value">
                 {attackDistData.map((e, i) => <Cell key={i} fill={e.color} stroke="transparent" />)}
@@ -223,109 +238,180 @@ export default function Dashboard() {
           </div>
         </Card>
 
-        {/* Protocol Distribution */}
         <Card style={{ display: "flex", flexDirection: "column" }}>
           <CardLabel>ATTACKS BY PROTOCOL</CardLabel>
           <div style={{ flex: 1, minHeight: 0 }}>
-          <ResponsiveContainer width="100%" height="100%" debounce={200}>
-            <BarChart data={protocolData} layout="vertical" barSize={12}>
-              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} width={36} />
-              <Tooltip {...tooltipStyle} cursor={{ fill: "#ffffff08" }} />
-              <Bar dataKey="value" name="Count" fill={COLORS.blue} radius={[0, 3, 3, 0]} opacity={0.85} />
-            </BarChart>
-          </ResponsiveContainer>
+            <ResponsiveContainer width="100%" height="100%" debounce={300}>
+              <BarChart data={protocolData} layout="vertical" barSize={12}>
+                <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} width={36} />
+                <Tooltip {...tooltipStyle} />
+                <Bar dataKey="value" name="Count" fill={COLORS.blue} radius={[0, 3, 3, 0]} opacity={0.85} />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </Card>
 
-        {/* Service Distribution */}
         <Card style={{ display: "flex", flexDirection: "column" }}>
           <CardLabel>ATTACKS BY SERVICE</CardLabel>
           <div style={{ flex: 1, minHeight: 0 }}>
-          <ResponsiveContainer width="100%" height="100%" debounce={200}>
-            <BarChart data={serviceData} layout="vertical" barSize={12}>
-              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} width={40} />
-              <Tooltip {...tooltipStyle} cursor={{ fill: "#ffffff08" }} />
-              <Bar dataKey="value" name="Count" fill={COLORS.purple} radius={[0, 3, 3, 0]} opacity={0.85} />
-            </BarChart>
-          </ResponsiveContainer>
+            <ResponsiveContainer width="100%" height="100%" debounce={300}>
+              <BarChart data={serviceData} layout="vertical" barSize={12}>
+                <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} width={40} />
+                <Tooltip {...tooltipStyle} />
+                <Bar dataKey="value" name="Count" fill={COLORS.purple} radius={[0, 3, 3, 0]} opacity={0.85} />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </Card>
       </div>
 
-      {/* Charts Row 2: State distribution */}
+      {/* Charts Row 2 */}
       <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: "1fr 2fr" }}>
-
-        {/* State Distribution */}
         <Card>
           <CardLabel>CONNECTION STATE</CardLabel>
-          <ResponsiveContainer width="100%" height={160} debounce={200}>
+          <ResponsiveContainer width="100%" height={160} debounce={300}>
             <BarChart data={stateData} barSize={24}>
               <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-              <Tooltip {...tooltipStyle} cursor={{ fill: "#ffffff08" }} />
+              <Tooltip {...tooltipStyle} />
               <Bar dataKey="value" name="Count" fill={COLORS.amber} radius={[3, 3, 0, 0]} opacity={0.85} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
 
-        {/* Severity Bar */}
         <Card>
           <CardLabel>SEVERITY BREAKDOWN</CardLabel>
-          <ResponsiveContainer width="100%" height={160} debounce={200}>
+          <ResponsiveContainer width="100%" height={160} debounce={300}>
             <BarChart data={severityData} barSize={36}>
               <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-              <Tooltip {...tooltipStyle} cursor={{ fill: "#ffffff08" }} />
+              <Tooltip {...tooltipStyle} />
               <Bar dataKey="value" name="Count" radius={[3, 3, 0, 0]} opacity={0.85}>
-                {severityData.map((entry, i) => (
-                  <Cell key={i} fill={entry.color} />
-                ))}
+                {severityData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </Card>
       </div>
 
-      {/* Recent Alerts Table */}
-      <Card>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-          <CardLabel>RECENT ALERTS</CardLabel>
-          <span style={{ fontSize: "11px", color: COLORS.cyan, cursor: "pointer" }}>View all →</span>
-        </div>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
-          <thead>
-            <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-              {["TYPE", "SEVERITY", "PROTOCOL", "SERVICE", "STATE", "SRC BYTES", "DST BYTES", "DURATION"].map(h => (
-                <th key={h} style={{ textAlign: "left", padding: "6px 10px", color: "#1a3a5a", fontWeight: 500, fontSize: "10px", letterSpacing: "0.05em" }}>{h}</th>
+      {/* Network Logs Toggle Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", marginTop: "4px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+          <button
+            onClick={() => setShowNetworkLogs(v => !v)}
+            style={{
+              display: "flex", alignItems: "center", gap: "8px",
+              padding: "6px 14px", borderRadius: "6px", cursor: "pointer",
+              border: `1px solid ${showNetworkLogs ? COLORS.cyan + "55" : COLORS.border}`,
+              background: showNetworkLogs ? `${COLORS.cyan}11` : "transparent",
+              color: showNetworkLogs ? COLORS.cyan : COLORS.muted,
+              fontSize: "12px",
+            }}
+          >
+            <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: showNetworkLogs ? COLORS.green : COLORS.muted, display: "inline-block" }} />
+            {showNetworkLogs ? "Live Network Traffic — ON" : "Live Network Traffic — OFF"}
+          </button>
+
+          {showNetworkLogs && (
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              <button
+                onClick={() => setSelectedDevice(null)}
+                style={{
+                  padding: "4px 10px", borderRadius: "5px", fontSize: "11px", cursor: "pointer",
+                  border: `1px solid ${!selectedDevice ? COLORS.cyan + "55" : COLORS.border}`,
+                  background: !selectedDevice ? `${COLORS.cyan}11` : "transparent",
+                  color: !selectedDevice ? COLORS.cyan : COLORS.muted,
+                }}
+              >
+                All
+              </button>
+              {devices.map(d => (
+                <button
+                  key={d}
+                  onClick={() => setSelectedDevice(d)}
+                  style={{
+                    padding: "4px 10px", borderRadius: "5px", fontSize: "11px", cursor: "pointer",
+                    fontFamily: "monospace",
+                    border: `1px solid ${selectedDevice === d ? COLORS.cyan + "55" : COLORS.border}`,
+                    background: selectedDevice === d ? `${COLORS.cyan}11` : "transparent",
+                    color: selectedDevice === d ? COLORS.cyan : COLORS.muted,
+                  }}
+                >
+                  {d}
+                </button>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {data.recent_alerts.map((alert, i) => (
-              <tr key={i} style={{ borderBottom: `1px solid #080f1a` }}>
-                <td style={{ padding: "8px 10px", color: COLORS.text, fontWeight: 600 }}>{alert.type}</td>
-                <td style={{ padding: "8px 10px" }}><SeverityDot severity={alert.severity} /></td>
-                <td style={{ padding: "8px 10px", fontFamily: "monospace", color: COLORS.blue, fontSize: "11px", textTransform: "uppercase" }}>{alert.proto}</td>
-                <td style={{ padding: "8px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "11px" }}>{alert.service === "-" ? "—" : alert.service}</td>
-                <td style={{ padding: "8px 10px" }}>
-                  <span style={{ padding: "2px 7px", borderRadius: "3px", background: "#06b6d415", color: COLORS.blue, border: "1px solid #06b6d430", fontSize: "10px" }}>
-                    {alert.state}
-                  </span>
-                </td>
-                <td style={{ padding: "8px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "11px" }}>{alert.sbytes.toLocaleString()}</td>
-                <td style={{ padding: "8px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "11px" }}>{alert.dbytes.toLocaleString()}</td>
-                <td style={{ padding: "8px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "11px" }}>{alert.duration}s</td>
+            </div>
+          )}
+        </div>
+
+        {showNetworkLogs && (
+          <span style={{ fontSize: "10px", color: COLORS.muted, fontFamily: "monospace" }}>
+            {networkLogs.length} packets · streaming
+          </span>
+        )}
+      </div>
+
+      {/* Network Logs Table */}
+      {showNetworkLogs && (
+        <Card>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+                {["TIME", "HOSTNAME", "SRC IP : PORT", "DST IP : PORT", "PROTO", "SERVICE", "STATE", "SRC BYTES", "DST BYTES"].map(h => (
+                  <th key={h} style={{ textAlign: "left", padding: "6px 10px", color: "#1a3a5a", fontWeight: 500, fontSize: "10px", letterSpacing: "0.05em" }}>{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+            </thead>
+            <tbody>
+              {networkLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={9} style={{ padding: "24px 10px", color: COLORS.muted, textAlign: "center", fontSize: "12px" }}>
+                    Waiting for packets...
+                  </td>
+                </tr>
+              ) : networkLogs.map((log, i) => (
+                <tr key={log._id || i} style={{ borderBottom: `1px solid #080f1a` }}>
+                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "10px", whiteSpace: "nowrap" }}>
+                    {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : "—"}
+                  </td>
+                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.green, fontSize: "10px", whiteSpace: "nowrap" }}>
+                    {log.hostname || "—"}
+                  </td>
+                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan, fontSize: "10px", whiteSpace: "nowrap" }}>
+                    {log.src_ip}:{log.src_port}
+                  </td>
+                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.text, fontSize: "10px", whiteSpace: "nowrap" }}>
+                    {log.dst_ip}:{log.dst_port}
+                  </td>
+                  <td style={{ padding: "7px 10px" }}>
+                    <ProtoBadge proto={log.proto} />
+                  </td>
+                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "10px" }}>
+                    {log.service && log.service !== "-" ? log.service.toUpperCase() : "—"}
+                  </td>
+                  <td style={{ padding: "7px 10px" }}>
+                    <span style={{ padding: "2px 6px", borderRadius: "3px", background: "#06b6d415", color: COLORS.blue, border: "1px solid #06b6d430", fontSize: "10px" }}>
+                      {log.state || "—"}
+                    </span>
+                  </td>
+                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "10px" }}>
+                    {log.sbytes?.toLocaleString() || "0"}
+                  </td>
+                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "10px" }}>
+                    {log.dbytes?.toLocaleString() || "0"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
 
     </div>
   );
