@@ -5,6 +5,9 @@ from pymongo import MongoClient
 from bson import ObjectId
 import smtplib
 from email.mime.text import MIMEText
+from fastapi.responses import StreamingResponse
+import asyncio
+import json
 
 app = FastAPI()
 
@@ -233,6 +236,52 @@ async def get_baselines(hostname: str = Query(default=None)):
         query["hostname"] = hostname
     files = list(fim_db.file_baselines.find(query).limit(100))
     return [serialize(f) for f in files]
+
+
+# --- Realtime logs ---
+
+@app.get("/api/network/stream")
+async def stream_network_logs(hostname: str = Query(default=None)):
+    async def event_generator():
+        last_id = None
+        while True:
+            try:
+                query = {}
+                if hostname:
+                    query["hostname"] = hostname
+                if last_id:
+                    query["_id"] = {"$gt": last_id}
+
+                logs = list(
+                    db.network_logs
+                    .find(query)
+                    .sort("_id", -1)
+                    .limit(20)
+                )
+
+                if logs:
+                    last_id = logs[0]["_id"]
+                    for log in logs:
+                        log["_id"] = str(log["_id"])
+                        if "timestamp" in log:
+                            log["timestamp"] = str(log["timestamp"])
+
+                    yield f"data: {json.dumps(logs)}\n\n"
+
+                await asyncio.sleep(3)
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                await asyncio.sleep(5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
 
 # --- ML SUMMARY ---
 

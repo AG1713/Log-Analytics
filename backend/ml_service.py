@@ -75,23 +75,6 @@ def generate_attack_summary():
     # --- State distribution (attacks only) ---
     state_counts = Counter(state_raw[attack_mask].str.upper())
 
-    # --- Recent alerts (last 20 attack records) ---
-    attack_rows = df[attack_mask].tail(20)
-    recent_alerts = []
-    for _, row in attack_rows.iterrows():
-        cat = row["predicted_cat"]
-        recent_alerts.append({
-            "id":       int(row["id"]),
-            "type":     cat,
-            "severity": SEVERITY_MAP.get(cat, "low"),
-            "proto":    proto_raw[row.name].lower(),
-            "service":  service_raw[row.name].lower(),
-            "state":    state_raw[row.name].upper(),
-            "duration": round(float(row["dur"]), 4),
-            "sbytes":   int(row["sbytes"]),
-            "dbytes":   int(row["dbytes"]),
-        })
-
     return {
         "total_records":        total,
         "total_attacks":        total - attack_counts.get("Normal", 0),
@@ -100,6 +83,5 @@ def generate_attack_summary():
         "severity_distribution": dict(severity_counts),
         "protocol_distribution": dict(proto_counts.most_common(6)),
         "service_distribution":  dict(service_counts.most_common(6)),
-        "state_distribution":    dict(state_counts),
-        "recent_alerts":         recent_alerts,
+        "state_distribution":    dict(state_counts)
     }
