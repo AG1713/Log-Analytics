@@ -170,6 +170,7 @@ def process_packet(packet, logs_col):
             "state": session["state"],
             "dur": duration,
             "sbytes": session["sbytes"], "dbytes": session["dbytes"],
+            "spkts":session["spkts"], "dpkts":session["dpkts"],
             "sttl": session["sttl"], "dttl": session["dttl"],
             "stcpb": session["stcpb"], "dtcpb": session["dtcpb"],
             "synack": session["synack"], "ackdat": session["ackdat"],
@@ -177,7 +178,7 @@ def process_packet(packet, logs_col):
         }
         
         # Filter DB noise
-        if final_log["dst_port"] not in [27017, 8000]:
+        if final_log["dst_port"] not in [27017, 8000] and final_log["src_port"] not in [27017,8000]:
             try:
                 logs_col.insert_one(final_log)
             except Exception: pass
