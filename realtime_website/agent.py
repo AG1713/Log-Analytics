@@ -146,18 +146,30 @@ def process_packet(packet, logs_col):
             session["ackdat"] = (now - session["synack_time"]).total_seconds()
             session["synack_time"] = None # Reset so we don't recalculate
 
-    # 6. Check for Termination (FIN / RST)
+    # 6. Check for Termination OR Timeout/Volume
+    current_duration = (now - session["start_time"]).total_seconds()
     should_ship = False
+
+    # Ship if: TCP closed, OR UDP has response, OR session is > 10 seconds, OR > 50 packets
     if packet.haslayer(TCP):
+        flags = packet[TCP].flags # Moved inside the check
         if 'F' in flags or 'R' in flags:
             session["state"] = "FIN" if 'F' in flags else "RST"
             should_ship = True
+        elif (session["spkts"] + session["dpkts"]) >= 1 and session["state"] == "REQ" and current_duration > 2:
+            # This captures spoofed SYN floods faster for your SIEM
+            session["state"] = "INT" # 'INT' for Interrupted/Incomplete
+            should_ship = True
+            
     elif proto_str == "udp":
-        # For UDP, since there is no 'FIN', we usually ship after X packets 
-        # or a timeout. For now, let's ship after 2 packets (Req/Res) to see data.
-        if session["dpkts"] >= 1:
+        if session["dpkts"] >= 1 or current_duration > 5:
             should_ship = True
 
+    elif current_duration > 10: 
+        should_ship = True
+        
+    if (session["spkts"] + session["dpkts"]) > 50:
+        should_ship = True
     # 7. Ship to MongoDB and Clear Session
     if should_ship:
         duration = (now - session["start_time"]).total_seconds()
@@ -178,6 +190,8 @@ def process_packet(packet, logs_col):
             "synack": session["synack"], "ackdat": session["ackdat"],
             "processed": False
         }
+
+        print(f"Shipping Flow: {src_ip} -> {dst_ip} ({session['state']})")
         
         # Filter DB noise
         if final_log["dst_port"] not in [27017, 8000] and final_log["src_port"] not in [27017,8000]:
