@@ -9,16 +9,18 @@ import threading
 from scapy.all import sniff, IP, TCP, UDP
 from datetime import datetime, timezone
 import getpass
+import argparse
 
 
 # --- CONFIGURATION ---
-SIEM_DB_URL = "mongodb://172.17.0.1:27017/"
 DEFAULT_PATHS = ["/etc/nginx", "/var/www/html"] 
 CHECK_INTERVAL = 10 
-BACKEND_URL = "http://172.17.0.1:8000/api/alerts"
-CONFIG_URL = "http://172.17.0.1:8000/api/config"
 SERVICE_MAP = {80: "http", 443: "http", 53: "dns", 21: "ftp", 22: "ssh"}
 PROTO_MAP = {6: "tcp", 17: "udp", 1: "icmp"}
+AGENT_HOSTNAME = ""
+SIEM_DB_URL = ""
+NETWORK_BACKEND_URL = ""
+CONFIG_URL = ""
 
 def check_permissions():
     # Check if we are root
@@ -228,6 +230,9 @@ def run_fim_monitor(client):
                     )
     print(f"[+] FIM: Initial Baseline established for {len(baseline)} files.")
 
+    for doc in hashes_col.find({"hostname": AGENT_HOSTNAME}):
+        baseline[doc["filepath"]] = doc["hash"]
+
     while True:
         time.sleep(CHECK_INTERVAL)
         watch_list = get_latest_watch_paths()
@@ -293,59 +298,27 @@ def send_fim_alert(data):
     except Exception as e:
         print(f"[!] Failed to ship alert: {e}")
 
-def start_log_shipper(client):
-    LOG_FILE = "/var/log/nginx/access.log"
-    
-    if not os.path.exists(LOG_FILE):
-        print(f"[!] Log Shipper: {LOG_FILE} not found. Monitoring active for Network and FIM only.")
-        return # Thread finishes cleanly
-
-    db = client.siem_db
-    logs_col = db.raw_logs
-    print(f"[*] Log Shipper active. Tailing {LOG_FILE}...")
-    
-    proc = subprocess.Popen(
-        ['tail', '-F', LOG_FILE],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
-
-    while True:
-        line = proc.stdout.readline()
-        if line:
-            clean_line = line.strip()
-            log_entry = {
-                "hostname": AGENT_HOSTNAME, # Use the hostname here too!
-                "source": "nginx-access-logs",
-                "timestamp": time.time(),
-                "raw_message": clean_line,
-                "processed": False 
-            }
-            try:
-                logs_col.insert_one(log_entry)
-            except Exception as e:
-                print(f"[!] Failed to ship log: {e}")
-        else:
-            time.sleep(0.1)
-
 
 
 def main():
-    global AGENT_HOSTNAME
+    global AGENT_HOSTNAME, SIEM_DB_URL, NETWORK_BACKEND_URL, CONFIG_URL
 
-    # --- STEP 1: GET THE HOSTNAME ---
-    # Try arguments first, then manual input, then fallback to system hostname
-    if len(sys.argv) > 1:
-        AGENT_HOSTNAME = sys.argv[1]
-    else:
-        try:
-            AGENT_HOSTNAME = input("Enter The AGENT_HOSTNAME: ").strip()
-        except EOFError:
-            AGENT_HOSTNAME = socket.gethostname()
-            
-        if not AGENT_HOSTNAME:
-            AGENT_HOSTNAME = socket.gethostname()
+    parser =argparse.ArgumentParser(
+            description = "This is agent.py for windows"
+            )
+    parser.add_argument("--siem_db_url",type=str, default="mongodb://172.17.0.1:27017/", help="used to provide the siem database url")
+    parser.add_argument("--network_backend_url",type=str, default="http://172.17.0.1:8000/api/network/alerts", help="used to provide the network alert to backend")
+    parser.add_argument("--config_url",type=str, default="http://172.17.0.1:8000/api/config",help="used to provide the config url")
+    parser.add_argument("--backend_url",type=str, default="http://172.17.0.1:8000/api/alerts",help="used to provide backend url")
+    parser.add_argument("--agent_hostname",type=str, default="no_nameHostname", help="used to provide agent hostname")
+
+    arguments=parser.parse_args()
+    SIEM_DB_URL=arguments.siem_db_url
+    NETWORK_BACKEND_URL=arguments.network_backend_url
+    CONFIG_URL=arguments.config_url
+    BACKEND_URL=arguments.backend_url
+    AGENT_HOSTNAME=arguments.agent_hostname    
+
 
     # --- STEP 2: HANDLE PERMISSIONS & ELEVATION ---
     # Ensure we have the rights to sniff packets (requires root/cap_net_raw)
@@ -403,7 +376,6 @@ def main():
     security_modules = [
         (run_fim_monitor, "FIM Integrity Watcher"),
         (start_network_sniffer, "Flow Aggregator (Network)"),
-        (start_log_shipper, "Log Shipper (Nginx/Syslog)")
     ]
 
     for target_func, name in security_modules:
