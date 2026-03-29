@@ -364,35 +364,20 @@ def main():
     parser =argparse.ArgumentParser(
             description = "This is agent.py for windows"
             )
-    parser.add_argument("--siem_db_url",type=str, default="mongodb://172.17.0.1:27017/", help="used to provide the siem database url")
+    parser.add_argument("--siem_db_url",type=str, default="mongodb://localhost:27017/", help="used to provide the siem database url")
     parser.add_argument("--network_backend_url",type=str, default="http://172.17.0.1:8000/api/network/alerts", help="used to provide the network alert to backend")
-    parser.add_argument("--config_url",type=str, default="http://172.17.0.1:8000/api/config",help="used to provide the config url")
-    parser.add_argument("--backend_url",type=str, default="http://172.17.0.1:8000/api/alerts",help="used to provide backend url")
+    parser.add_argument("--config_url",type=str, default="http://localhost:8000/api/config",help="used to provide the config url")
+    parser.add_argument("--backend_url",type=str, default="http://localhost:8000/api/alerts",help="used to provide backend url")
     parser.add_argument("--agent_hostname",type=str, default="no_nameHostname", help="used to provide agent hostname")
 
     arguments=parser.parse_args()
+
     SIEM_DB_URL=arguments.siem_db_url
     NETWORK_BACKEND_URL=arguments.network_backend_url
     CONFIG_URL=arguments.config_url
     BACKEND_URL=arguments.backend_url
     AGENT_HOSTNAME=arguments.agent_hostname
     
-
-    client = None
-    while True:
-        try:
-            print(f"[*] Connecting to SIEM MongoDB at {SIEM_DB_URL}...")
-            client = MongoClient(SIEM_DB_URL, serverSelectionTimeoutMS=2000)
-            client.admin.command('ping')
-            print("[+] Successfully connected!")
-            break
-        except Exception as e:
-            print(f"[!] Connection failed: {e}. Retrying in 5s...")
-            time.sleep(5)
-    
-    creating_hostname_collection(AGENT_HOSTNAME,client)
-    
-    # --- ELEVATION CHECK ---
     if not is_admin():
         print("[!] Not running as Admin. Requesting elevation...")
         
@@ -429,6 +414,22 @@ def main():
             return
     else:
         print("Npcap found!")
+
+    client = None
+    while True:
+        try:
+            print(f"[*] Connecting to SIEM MongoDB at {SIEM_DB_URL}...")
+            client = MongoClient(SIEM_DB_URL, serverSelectionTimeoutMS=2000)
+            client.admin.command('ping')
+            print("[+] Successfully connected!")
+            break
+        except Exception as e:
+            print(f"[!] Connection failed: {e}. Retrying in 5s...")
+            time.sleep(5)
+    
+    creating_hostname_collection(AGENT_HOSTNAME,client)
+    
+    # --- ELEVATION CHECK ---
 
     #print("Checking for Docker....")
     #if not checking("Docker"):
