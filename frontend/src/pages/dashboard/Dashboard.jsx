@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import {
   PieChart, Pie, Cell, Tooltip, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, ResponsiveContainer
+  XAxis, YAxis, CartesianGrid, ResponsiveContainer,
+  LineChart, Line, Legend,
 } from "recharts";
 
 // --- Constants ---
@@ -24,6 +25,7 @@ const COLORS = {
 
 const ATTACK_COLORS = {
   Normal:         COLORS.green,
+  BENIGN:         COLORS.green,
   DoS:            COLORS.red,
   Exploits:       COLORS.orange,
   Fuzzers:        COLORS.amber,
@@ -79,12 +81,33 @@ const StatCard = ({ label, value, accent, sub, alert }) => (
   </div>
 );
 
-const SeverityDot = ({ severity }) => (
-  <span style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: SEVERITY_COLORS[severity] || COLORS.muted, display: "inline-block" }} />
-    <span style={{ color: SEVERITY_COLORS[severity] || COLORS.muted, textTransform: "capitalize", fontSize: "11px" }}>{severity}</span>
+const SeverityBadge = ({ severity }) => (
+  <span style={{
+    padding: "2px 6px", borderRadius: "3px", fontSize: "10px",
+    background: `${SEVERITY_COLORS[severity] || COLORS.muted}20`,
+    color: SEVERITY_COLORS[severity] || COLORS.muted,
+    border: `1px solid ${SEVERITY_COLORS[severity] || COLORS.muted}40`,
+    textTransform: "capitalize",
+  }}>
+    {severity || "—"}
   </span>
 );
+
+const AttackBadge = ({ attack }) => {
+  const color = ATTACK_COLORS[attack] || COLORS.muted;
+  const isAttack = attack && attack !== "BENIGN" && attack !== "Normal";
+  return (
+    <span style={{
+      padding: "2px 6px", borderRadius: "3px", fontSize: "10px",
+      background: `${color}20`,
+      color: color,
+      border: `1px solid ${color}40`,
+      fontWeight: isAttack ? 600 : 400,
+    }}>
+      {attack || "—"}
+    </span>
+  );
+};
 
 const ProtoBadge = ({ proto }) => {
   const s = PROTO_STYLE[proto] || { bg: "#ffffff11", color: COLORS.muted, border: "#ffffff22" };
@@ -97,34 +120,56 @@ const ProtoBadge = ({ proto }) => {
 
 // --- Main Component ---
 export default function Dashboard() {
-  // All hooks at the top — before any early returns
   const [showNetworkLogs, setShowNetworkLogs] = useState(false);
   const [networkLogs, setNetworkLogs]         = useState([]);
   const [selectedDevice, setSelectedDevice]   = useState(null);
 
+  // Summary cards + charts — refresh every 30s
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["attackSummary"],
-    queryFn:  api.fetchAttackSummary,
+    queryKey:      ["attackSummary"],
+    queryFn:       api.fetchAttackSummary,
+    refetchInterval: 30000,
+  });
+
+  // Attack timeline for the line chart — refresh every 30s
+  const { data: timelineData = [] } = useQuery({
+    queryKey:      ["attackTimeline"],
+    queryFn:       () => api.fetchAttackTimeline(6),
+    refetchInterval: 30000,
   });
 
   const { data: devicesData } = useQuery({
-    queryKey: ["devices"],
-    queryFn:  api.fetchDevices,
+    queryKey:  ["devices"],
+    queryFn:   api.fetchDevices,
     staleTime: 30000,
   });
   const devices = devicesData?.devices || [];
 
+  // Initial load for live table
+  const { data: initialLogs = [] } = useQuery({
+    queryKey: ["networkLogs"],
+    queryFn:  () => api.fetchNetworkLogs(50),
+    enabled:  showNetworkLogs,    // only fetch when table is open
+    staleTime: 0,
+  });
+
+  // Seed table with initial logs when they arrive
+  useEffect(() => {
+    if (initialLogs.length > 0 && networkLogs.length === 0) {
+      setNetworkLogs(initialLogs);
+    }
+  }, [initialLogs]);
+
   // SSE for live network logs
   useEffect(() => {
     if (!showNetworkLogs) {
-      setNetworkLogs([]); // clear on toggle off
+      setNetworkLogs([]);
       return;
     }
 
-    setNetworkLogs([]) // clearing the network logs once host name changes (without this, it was just adding rows)
+    setNetworkLogs([]);
 
-    const params = selectedDevice ? `?hostname=${selectedDevice}` : "";
-    const es = new EventSource(`http://localhost:8000/api/network/stream${params}`);
+    const es = api.streamNetwork(selectedDevice);
 
     es.onmessage = (e) => {
       try {
@@ -138,8 +183,7 @@ export default function Dashboard() {
     return () => es.close();
   }, [showNetworkLogs, selectedDevice]);
 
-  // Early returns after all hooks
-  if (isLoading) return (
+  if (isLoading || !data) return (
     <div style={{ background: COLORS.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontFamily: "monospace", fontSize: "13px" }}>
       LOADING...
     </div>
@@ -168,10 +212,6 @@ export default function Dashboard() {
     name: name.toUpperCase(), value,
   }));
 
-  const stateData = Object.entries(data.state_distribution).map(([name, value]) => ({
-    name, value,
-  }));
-
   const attackRate    = ((data.total_attacks / data.total_records) * 100).toFixed(1);
   const criticalCount = data.severity_distribution?.critical || 0;
 
@@ -195,7 +235,7 @@ export default function Dashboard() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-4 gap-3 mb-4">
-        <StatCard label="TOTAL RECORDS"   value={data.total_records}  accent={COLORS.blue}   sub="From testing dataset" />
+        <StatCard label="TOTAL RECORDS"   value={data.total_records}  accent={COLORS.blue}   sub="From live dataset" />
         <StatCard label="TOTAL ATTACKS"   value={data.total_attacks}  accent={COLORS.red}    sub={`${attackRate}% of total traffic`} alert />
         <StatCard label="CRITICAL EVENTS" value={criticalCount}       accent={COLORS.orange} sub="Worms, Backdoors, Shellcode" alert />
         <StatCard label="NORMAL TRAFFIC"  value={data.total_normal}   accent={COLORS.green}  sub={`${(100 - parseFloat(attackRate)).toFixed(1)}% of total`} />
@@ -271,16 +311,26 @@ export default function Dashboard() {
 
       {/* Charts Row 2 */}
       <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: "1fr 2fr" }}>
+
+        {/* ✅ REPLACED: Connection State → Attack Timeline */}
         <Card>
-          <CardLabel>CONNECTION STATE</CardLabel>
+          <CardLabel>ATTACK TIMELINE · LAST 6H</CardLabel>
           <ResponsiveContainer width="100%" height={160} debounce={300}>
-            <BarChart data={stateData} barSize={24}>
-              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-              <XAxis dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-              <Tooltip {...tooltipStyle} />
-              <Bar dataKey="value" name="Count" fill={COLORS.amber} radius={[3, 3, 0, 0]} opacity={0.85} />
-            </BarChart>
+            {timelineData.length > 0 ? (
+              <LineChart data={timelineData}>
+                <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
+                <XAxis dataKey="time" tick={{ fontSize: 9, fill: COLORS.muted }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
+                <Tooltip {...tooltipStyle} />
+                <Legend wrapperStyle={{ fontSize: "10px", color: COLORS.muted }} />
+                <Line type="monotone" dataKey="attacks" stroke={COLORS.red}   dot={false} strokeWidth={1.5} name="Attacks" />
+                <Line type="monotone" dataKey="normal"  stroke={COLORS.green} dot={false} strokeWidth={1.5} name="Normal"  />
+              </LineChart>
+            ) : (
+              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontSize: "11px" }}>
+                Collecting data...
+              </div>
+            )}
           </ResponsiveContainer>
         </Card>
 
@@ -357,13 +407,13 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Network Logs Table */}
+      {/* Network Logs Table — updated columns for predictions schema */}
       {showNetworkLogs && (
         <Card>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-                {["TIME", "HOSTNAME", "SRC IP : PORT", "DST IP : PORT", "PROTO", "SERVICE", "STATE", "SRC BYTES", "DST BYTES"].map(h => (
+                {["TIME", "SRC IP", "DST IP", "PROTO", "SERVICE", "ATTACK TYPE", "SEVERITY", "CONFIDENCE"].map(h => (
                   <th key={h} style={{ textAlign: "left", padding: "6px 10px", color: "#1a3a5a", fontWeight: 500, fontSize: "10px", letterSpacing: "0.05em" }}>{h}</th>
                 ))}
               </tr>
@@ -371,23 +421,29 @@ export default function Dashboard() {
             <tbody>
               {networkLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={9} style={{ padding: "24px 10px", color: COLORS.muted, textAlign: "center", fontSize: "12px" }}>
+                  <td colSpan={8} style={{ padding: "24px 10px", color: COLORS.muted, textAlign: "center", fontSize: "12px" }}>
                     Waiting for packets...
                   </td>
                 </tr>
               ) : networkLogs.map((log, i) => (
-                <tr key={log._id || i} style={{ borderBottom: `1px solid #080f1a` }}>
+                <tr
+                  key={log._id || i}
+                  style={{
+                    borderBottom: `1px solid #080f1a`,
+                    // highlight attack rows subtly
+                    background: log.attack && log.attack !== "BENIGN" && log.attack !== "Normal"
+                      ? `${COLORS.red}08`
+                      : "transparent",
+                  }}
+                >
                   <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "10px", whiteSpace: "nowrap" }}>
                     {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : "—"}
                   </td>
-                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.green, fontSize: "10px", whiteSpace: "nowrap" }}>
-                    {log.hostname || "—"}
-                  </td>
                   <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan, fontSize: "10px", whiteSpace: "nowrap" }}>
-                    {log.src_ip}:{log.src_port}
+                    {log.src_ip || "—"}
                   </td>
                   <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.text, fontSize: "10px", whiteSpace: "nowrap" }}>
-                    {log.dst_ip}:{log.dst_port}
+                    {log.dst_ip || "—"}
                   </td>
                   <td style={{ padding: "7px 10px" }}>
                     <ProtoBadge proto={log.proto} />
@@ -396,15 +452,13 @@ export default function Dashboard() {
                     {log.service && log.service !== "-" ? log.service.toUpperCase() : "—"}
                   </td>
                   <td style={{ padding: "7px 10px" }}>
-                    <span style={{ padding: "2px 6px", borderRadius: "3px", background: "#06b6d415", color: COLORS.blue, border: "1px solid #06b6d430", fontSize: "10px" }}>
-                      {log.state || "—"}
-                    </span>
+                    <AttackBadge attack={log.attack} />
                   </td>
-                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "10px" }}>
-                    {log.sbytes?.toLocaleString() || "0"}
+                  <td style={{ padding: "7px 10px" }}>
+                    <SeverityBadge severity={log.severity} />
                   </td>
-                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "10px" }}>
-                    {log.dbytes?.toLocaleString() || "0"}
+                  <td style={{ padding: "7px 10px", fontFamily: "monospace", fontSize: "10px", color: log.confidence >= 0.9 ? COLORS.red : log.confidence >= 0.7 ? COLORS.amber : COLORS.green }}>
+                    {log.confidence != null ? `${(log.confidence * 100).toFixed(1)}%` : "—"}
                   </td>
                 </tr>
               ))}

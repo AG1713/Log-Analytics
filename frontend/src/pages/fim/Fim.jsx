@@ -151,18 +151,21 @@ export default function Fim() {
     queryKey: ["alerts", selectedDevice],
     queryFn:  () => api.fetchAlerts(selectedDevice),
     refetchInterval: 10000,
+    staleTime: 10000,
   });
 
   const { data: configData, isLoading: configLoading } = useQuery({
     queryKey: ["config", selectedDevice],
     queryFn:  () => api.fetchConfig(selectedDevice),
     refetchInterval: 10000,
+    staleTime: 10000,
   });
 
   const { data: devicesData } = useQuery({
     queryKey: ["devices"],
     queryFn:  api.fetchDevices,
     refetchInterval: 30000,
+    staleTime: 10000,
   });
 
   const alerts  = alertsData || [];
@@ -216,7 +219,7 @@ export default function Fim() {
   const totalNew       = alerts.filter(a => a.type === "FIM_NEW_FILE").length;
   const filteredAlerts = filter === "ALL" ? alerts : alerts.filter(a => a.type === filter);
 
-  if (loading) return (
+  if (alertsLoading && !alertsData.length) return (
     <div style={{ background: COLORS.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontFamily: "monospace" }}>
       LOADING...
     </div>

@@ -2,7 +2,7 @@ services:
   mongodb:
     image: mongo:4.4.29
     ports:
-      - "27017:27017" 
+      - "27018:27017" 
     # extra_hosts allows containers to resolve the host machine's gateway
     extra_hosts:
       - "host.docker.internal:host-gateway"

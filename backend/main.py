@@ -1,5 +1,5 @@
-from fastapi import FastAPI, Request, Query
-from ml_service import generate_attack_summary
+from fastapi import FastAPI, Request, Query, HTTPException
+from dataset_summary import generate_attack_summary
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 from bson import ObjectId
@@ -8,8 +8,18 @@ from email.mime.text import MIMEText
 from fastapi.responses import StreamingResponse
 import asyncio
 import json
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+from ml_worker import predict_log
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("🚀 Starting background worker")
+    task = asyncio.create_task(worker())
+    yield
+    task.cancel()
+
+app = FastAPI(lifespan = lifespan)
 
 # --- CONFIGURATION ---
 GMAIL_USER        = "your_actual_email@gmail.com"
@@ -31,15 +41,22 @@ app.add_middleware(
 )
 
 # --- DB CONNECTIONS ---
-client = MongoClient("mongodb://172.17.0.1:27017/")
+client = MongoClient("mongodb://172.17.0.1:27018/")
 db         = client.siem_db
 config_db  = client.siem_config
 fim_db     = client.fim_integrity
 
 # --- HELPERS ---
 
+# def serialize(doc):
+#     doc["_id"] = str(doc["_id"])
+#     return doc
+
 def serialize(doc):
     doc["_id"] = str(doc["_id"])
+    for key, value in doc.items():
+        if isinstance(value, datetime):
+            doc[key] = value.isoformat()
     return doc
 
 def send_email_notification(alert_type, file_path, severity):
@@ -189,43 +206,43 @@ async def clear_alerts(hostname: str = Query(default=None)):
 
 # --- NETWORK LOGS ---
 
-@app.get("/api/network/logs")
-async def get_network_logs(
-    hostname: str = Query(default=None),
-    limit: int = Query(default=50)
-):
-    query = {}
-    if hostname:
-        query["hostname"] = hostname
-    logs = list(db.network_logs.find(query).sort("_id", -1).limit(limit))
-    return [serialize(l) for l in logs]
+# @app.get("/api/network/logs")
+# async def get_network_logs(
+#     hostname: str = Query(default=None),
+#     limit: int = Query(default=50)
+# ):
+#     query = {}
+#     if hostname:
+#         query["hostname"] = hostname
+#     logs = list(db.network_logs.find(query).sort("_id", -1).limit(limit))
+#     return [serialize(l) for l in logs]
 
-@app.get("/api/network/summary")
-async def get_network_summary(hostname: str = Query(default=None)):
-    query        = {"hostname": hostname} if hostname else {}
-    pipeline_base = [{"$match": query}] if query else []
+# @app.get("/api/network/summary")
+# async def get_network_summary(hostname: str = Query(default=None)):
+#     query        = {"hostname": hostname} if hostname else {}
+#     pipeline_base = [{"$match": query}] if query else []
 
-    # The below are just MongoDB aggregate queries
-    total = db.network_logs.count_documents(query)
-    proto_counts = {
-        d["_id"]: d["count"]
-        for d in db.network_logs.aggregate(pipeline_base + [
-            {"$group": {"_id": "$proto", "count": {"$sum": 1}}}
-        ])
-    }
-    top_ips = [
-        {"ip": d["_id"], "count": d["count"]}
-        for d in db.network_logs.aggregate(pipeline_base + [
-            {"$group": {"_id": "$src_ip", "count": {"$sum": 1}}},
-            {"$sort":  {"count": -1}},
-            {"$limit": 5}
-        ])
-    ]
-    return {
-        "total":              total,
-        "proto_distribution": proto_counts,
-        "top_source_ips":     top_ips,
-    }
+#     # The below are just MongoDB aggregate queries
+#     total = db.network_logs.count_documents(query)
+#     proto_counts = {
+#         d["_id"]: d["count"]
+#         for d in db.network_logs.aggregate(pipeline_base + [
+#             {"$group": {"_id": "$proto", "count": {"$sum": 1}}}
+#         ])
+#     }
+#     top_ips = [
+#         {"ip": d["_id"], "count": d["count"]}
+#         for d in db.network_logs.aggregate(pipeline_base + [
+#             {"$group": {"_id": "$src_ip", "count": {"$sum": 1}}},
+#             {"$sort":  {"count": -1}},
+#             {"$limit": 5}
+#         ])
+#     ]
+#     return {
+#         "total":              total,
+#         "proto_distribution": proto_counts,
+#         "top_source_ips":     top_ips,
+#     }
 
 # --- FIM BASELINES ---
 
@@ -253,7 +270,7 @@ async def stream_network_logs(hostname: str = Query(default=None)):
                     query["_id"] = {"$gt": last_id}
 
                 logs = list(
-                    db.network_logs
+                    db.predictions
                     .find(query)
                     .sort("_id", -1)
                     .limit(20)
@@ -261,12 +278,7 @@ async def stream_network_logs(hostname: str = Query(default=None)):
 
                 if logs:
                     last_id = logs[0]["_id"]
-                    for log in logs:
-                        log["_id"] = str(log["_id"])
-                        if "timestamp" in log:
-                            log["timestamp"] = str(log["timestamp"])
-
-                    yield f"data: {json.dumps(logs)}\n\n"
+                    yield f"data: {json.dumps([serialize(l) for l in logs])}\n\n"  # ← use serialize() instead of manual conversion
 
                 await asyncio.sleep(3)
             except Exception as e:
@@ -285,12 +297,222 @@ async def stream_network_logs(hostname: str = Query(default=None)):
 
 # --- ML SUMMARY ---
 
-@app.get("/attack_summary")
-def attack_summary():
-    return generate_attack_summary()
+# @app.get("/attack_summary")
+# def attack_summary():
+#     return generate_attack_summary()
 
 # Before running backend:
 #   1) python -m venv venv
 #   2) venv\Scripts\activate
 #   3) pip install -r requirements.txt
 # To run: uvicorn main:app --reload
+
+
+# -----------------------------------------------------------------------------------------------------------
+# New endpoints
+# -----------------------------------------------------------------------------------------------------------
+
+
+# ============================
+# 🔁 BACKGROUND WORKER
+# ============================
+
+def process_pending_logs():
+    """
+    Synchronous function containing the heavy lifting (DB + ML).
+    This will be run in a separate thread.
+    """
+    logs = list(db.network_logs.find({
+        "processed": {"$ne": True}
+    }).limit(20))
+
+    for log in logs:
+        predict_log(log) # Heavy ML execution
+        db.network_logs.update_one(
+            {"_id": log["_id"]},
+            {"$set": {"processed": True}}
+        )
+
+async def worker():
+    """
+    Asynchronous loop that schedules the heavy lifting without blocking.
+    """
+    while True:
+        try:
+            # Offload the blocking code to a separate thread
+            await asyncio.to_thread(process_pending_logs)
+            await asyncio.sleep(2)
+        except Exception as e:
+            print("[!] Worker error:", e)
+            await asyncio.sleep(5)
+
+# ============================
+# 🔥 FIXED LOG INGESTION
+# ============================
+
+@app.post("/api/logs")
+async def receive_logs(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    if isinstance(data, dict):
+        logs = [data]
+    elif isinstance(data, list):
+        logs = data
+    else:
+        raise HTTPException(status_code=400, detail="Invalid format")
+
+    for log in logs:
+        log["received_at"] = datetime.utcnow()
+        log["processed"] = False
+
+    # Insert into database
+    result = db.network_logs.insert_many(logs)
+
+    # REMOVED predict_log() loop. The background worker will pick these up automatically!
+
+    return {"status": "logs stored", "count": len(logs)}
+
+# ============================
+# 📊 SIMPLE DASHBOARD API
+# ============================
+
+@app.get("/api/attack-summary")
+def attack_summary():
+
+    total_records = db.network_logs.count_documents({})
+    total_attacks = db.predictions.count_documents({"attack": {"$ne": "BENIGN"}})
+    total_normal = db.predictions.count_documents({"attack": "BENIGN"})
+
+    # 🔥 Attack distribution
+    pipeline = [
+        {"$group": {"_id": "$attack", "count": {"$sum": 1}}}
+    ]
+    attack_data = db.predictions.aggregate(pipeline)
+    attack_distribution = {item["_id"]: item["count"] for item in attack_data}
+
+    # 🔥 Severity distribution
+    severity_data = db.predictions.aggregate([
+        {"$group": {"_id": "$severity", "count": {"$sum": 1}}}
+    ])
+    severity_distribution = {item["_id"]: item["count"] for item in severity_data}
+
+    # 🔥 Protocol distribution
+    proto_data = db.predictions.aggregate([
+        {"$group": {"_id": "$proto", "count": {"$sum": 1}}}
+    ])
+    protocol_distribution = {item["_id"]: item["count"] for item in proto_data}
+
+    # 🔥 Service distribution
+    service_data = db.predictions.aggregate([
+        {"$group": {"_id": "$service", "count": {"$sum": 1}}}
+    ])
+    service_distribution = {item["_id"]: item["count"] for item in service_data}
+
+    return {
+        "total_records": total_records,
+        "total_attacks": total_attacks,
+        "total_normal": total_normal,
+        "attack_distribution": attack_distribution,
+        "severity_distribution": severity_distribution,
+        "protocol_distribution": protocol_distribution,
+        "service_distribution": service_distribution
+    }
+
+
+# ============================
+# 📊 LIVE ATTACK COUNT
+# ============================
+
+@app.get("/api/live-attacks")
+def live_attacks():
+    count = db.predictions.count_documents({"attack": {"$ne": "BENIGN"}})
+    return {"live_attacks": count}
+
+
+# ============================
+# 📈 ATTACK TIMELINE
+# ============================
+
+@app.get("/api/attack-timeline")
+def get_attack_timeline(hours: int = 6):
+    """
+    Returns an aggregated timeline of attacks vs normal traffic 
+    grouped by hour for the specified time window.
+    """
+    # Calculate the time cutoff
+    time_threshold = datetime.utcnow() - timedelta(hours=hours)
+
+    # Note: Replace 'received_at' with 'timestamp' if your DB uses a different time field
+    pipeline = [
+        {"$match": {"received_at": {"$gte": time_threshold}}},
+        {"$group": {
+            "_id": {
+                "year": {"$year": "$received_at"},
+                "month": {"$month": "$received_at"},
+                "day": {"$dayOfMonth": "$received_at"},
+                "hour": {"$hour": "$received_at"}
+            },
+            "total_traffic": {"$sum": 1},
+            "attacks": {
+                "$sum": {"$cond": [{"$ne": ["$attack", "BENIGN"]}, 1, 0]}
+            },
+            "normal": {
+                "$sum": {"$cond": [{"$eq": ["$attack", "BENIGN"]}, 1, 0]}
+            }
+        }},
+        {"$sort": {"_id.year": 1, "_id.month": 1, "_id.day": 1, "_id.hour": 1}}
+    ]
+
+    results = list(db.predictions.aggregate(pipeline))
+
+    # Format it nicely for your frontend charting library (like Chart.js or Recharts)
+    formatted_data = []
+    for res in results:
+        # Reconstruct an ISO string for the hour block
+        dt_str = f"{res['_id']['year']}-{res['_id']['month']:02d}-{res['_id']['day']:02d}T{res['_id']['hour']:02d}:00:00Z"
+        
+        formatted_data.append({
+            "timestamp": dt_str,
+            "total_traffic": res["total_traffic"],
+            "attacks": res["attacks"],
+            "normal": res["normal"]
+        })
+
+    return formatted_data
+
+# ============================
+# 📊 GET LOGS
+# ============================
+
+@app.get("/api/network/logs")
+def get_logs(limit: int = 50):
+    logs = list(
+        db.predictions.find().sort("_id", -1).limit(limit)
+    )
+    return [serialize(l) for l in logs]
+
+
+# ============================
+# ❤️ HEALTH CHECK ???????????????????
+# ============================
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+# @app.get("/api/live-logs") # ???????????????
+# def get_live_logs():
+#     logs = list(
+#         db.network_logs
+#         .find({})
+#         .sort("_id", -1)
+#         .limit(20)
+#     )
+
+#     for log in logs:
+#         log["_id"] = str(log["_id"])
+
+#     return logs

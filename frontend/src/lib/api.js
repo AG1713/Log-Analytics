@@ -5,8 +5,10 @@ const post = (url, body) => fetch(`${BASE}${url}`, { method: "POST", headers: { 
 const del  = (url, body) => fetch(`${BASE}${url}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, ...(body && { body: JSON.stringify(body) }) }).then(r => r.json());
 
 export const api = {
-  // ML
-  fetchAttackSummary:  () => get("/attack_summary"),
+  // ML / Dashboard
+  fetchAttackSummary:  () => get("/api/attack-summary"),   // ← fixed: was /attack_summary (old CSV endpoint)
+  fetchAttackTimeline: (hours = 6) => get(`/api/attack-timeline?hours=${hours}`),  // ← new
+  fetchNetworkLogs:    (limit = 50) => get(`/api/network/logs?limit=${limit}`),     // ← new (initial table load)
 
   // Devices
   fetchDevices:        () => get("/api/devices"),
@@ -21,7 +23,9 @@ export const api = {
   addPath:             (path, hostname) => post("/api/add_path", { path, hostname }),
   removePath:          (path, hostname) => del("/api/config/path", { path, hostname }),
 
-  // Network
-  fetchNetworkLogs:    (hostname, limit = 50) => get(`/api/network/logs?limit=${limit}${hostname ? `&hostname=${hostname}` : ""}`),
-  fetchNetworkSummary: (hostname) => get(`/api/network/summary${hostname ? `?hostname=${hostname}` : ""}`),
+  // Network stream (SSE)
+  streamNetwork: (hostname) => {
+    const params = hostname ? `?hostname=${hostname}` : "";
+    return new EventSource(`${BASE}/api/network/stream${params}`);
+  },
 };
