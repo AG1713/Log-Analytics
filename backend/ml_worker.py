@@ -236,7 +236,7 @@ os.environ["LOKY_MAX_CPU_COUNT"] = "4"
 # ============================
 # 🔧 DB CONNECTION
 # ============================
-client = MongoClient("mongodb://localhost:27017/")
+client = MongoClient("mongodb://172.17.0.1:27018/")
 db = client["siem_db"]
 
 # ============================

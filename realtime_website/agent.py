@@ -79,7 +79,7 @@ def creating_hostname_collection(hostname, client):
 # Global dictionary to track active flows
 sessions = {}
 
-def process_packet(packet, logs_col):
+def process_packet(packet):
     if not packet.haslayer(IP):
         return
 
@@ -168,7 +168,7 @@ def process_packet(packet, logs_col):
     elif current_duration > 10: 
         should_ship = True
         
-    if (session["spkts"] + session["dpkts"]) > 50:
+    if (session["spkts"] + session["dpkts"]) > 1:
         should_ship = True
     # 7. Ship to MongoDB and Clear Session
     if should_ship:
@@ -177,7 +177,7 @@ def process_packet(packet, logs_col):
         # Calculate final log matching UNSW-NB15 structure
         final_log = {
             "hostname": session["hostname"],
-            "timestamp": now,
+            "timestamp": now.isoformat(),
             "src_ip": session["src_ip"], "dst_ip": session["dst_ip"],
             "src_port": session["src_port"], "dst_port": session["dst_port"],
             "proto": session["proto"],
@@ -196,17 +196,20 @@ def process_packet(packet, logs_col):
         # Filter DB noise
         if final_log["dst_port"] not in [27017, 8000] and final_log["src_port"] not in [27017,8000]:
             try:
-                logs_col.insert_one(final_log)
-            except Exception: pass
+                print(f"[+] Attempting the ship logs to {NETWORK_BACKEND_URL}")
+                response = requests.post(NETWORK_BACKEND_URL, json=final_log, timeout=15)
+                print(f"[+] Server Response: {response.status_code}-{response.text}")
+            except Exception as e:
+                print(f"[!] Failed to ship log {e}")
         
         del sessions[flow_key]
 
 
 def start_network_sniffer(client):
-    db = client.siem_db
-    logs_col = db.network_logs
+    #db = client.siem_db
+    #logs_col = db.network_logs
     print("[*] Network Sniffer active. Capturing traffic...")
-    sniff(prn=lambda pkt: process_packet(pkt, logs_col), store=0)
+    sniff(prn=lambda pkt: process_packet(pkt), store=0)
 
 def get_latest_watch_paths():
     try:
@@ -220,7 +223,7 @@ def get_latest_watch_paths():
 def run_fim_monitor(client):
     fim_db = client.fim_integrity
     hashes_col = fim_db.file_baselines
-    alerts_col = fim_db.fim_alerts
+    #alerts_col = fim_db.fim_alerts
 
     print("[*] FIM: Syncing with Backend Configuration...")
     baseline = {}
@@ -269,7 +272,7 @@ def run_fim_monitor(client):
                             "severity": "medium"
                         }
                         send_fim_alert(alert)
-                        alerts_col.insert_one({**alert, "time": time.ctime(), "hash": current_hash})
+                        #alerts_col.insert_one({**alert, "time": time.ctime(), "hash": current_hash})
                         baseline[full_path] = current_hash
                         hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}}, upsert=True)
 
@@ -282,10 +285,10 @@ def run_fim_monitor(client):
                             "severity": "high"
                         }
                         send_fim_alert(alert)
-                        alerts_col.insert_one({
-                            **alert, "time": time.ctime(), 
-                            "old_hash": baseline[full_path], "new_hash": current_hash
-                        })
+                        #alerts_col.insert_one({
+                            #**alert, "time": time.ctime(), 
+                            #"old_hash": baseline[full_path], "new_hash": current_hash
+                        #})
                         baseline[full_path] = current_hash
                         hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}})
 
@@ -302,7 +305,7 @@ def run_fim_monitor(client):
                     }
                     print(f"[!!] DELETION DETECTED: {path}")
                     send_fim_alert(alert)
-                    alerts_col.insert_one({**alert, "time": time.ctime()})
+                    #alerts_col.insert_one({**alert, "time": time.ctime()})
                     del baseline[path]
                     hashes_col.delete_one({"filepath": path})
 
@@ -315,13 +318,13 @@ def send_fim_alert(data):
 
 
 def main():
-    global AGENT_HOSTNAME, SIEM_DB_URL, NETWORK_BACKEND_URL, CONFIG_URL
+    global AGENT_HOSTNAME, SIEM_DB_URL, NETWORK_BACKEND_URL, CONFIG_URL, BACKEND_URL
 
     parser =argparse.ArgumentParser(
             description = "This is agent.py for windows"
             )
-    parser.add_argument("--siem_db_url",type=str, default="mongodb://172.17.0.1:27017/", help="used to provide the siem database url")
-    parser.add_argument("--network_backend_url",type=str, default="http://172.17.0.1:8000/api/network/alerts", help="used to provide the network alert to backend")
+    parser.add_argument("--siem_db_url",type=str, default="mongodb://172.17.0.1:27018/", help="used to provide the siem database url")
+    parser.add_argument("--network_backend_url",type=str, default="http://172.17.0.1:8000/api/logs", help="used to provide the network alert to backend")
     parser.add_argument("--config_url",type=str, default="http://172.17.0.1:8000/api/config",help="used to provide the config url")
     parser.add_argument("--backend_url",type=str, default="http://172.17.0.1:8000/api/alerts",help="used to provide backend url")
     parser.add_argument("--agent_hostname",type=str, default="no_nameHostname", help="used to provide agent hostname")
@@ -354,6 +357,20 @@ def main():
             print("[!] Fatal: Even as root, packet capture is unavailable.")
             sys.exit(1)
 
+    # --- STEP 5: DAEMONIZE FOR WEBSITE MODE ---
+    # If Nginx is present, we fork to run the agent as a background daemon
+    if os.path.exists("/usr/sbin/nginx"):
+        print("[*] Launching Nginx and backgrounding SIEM Agent...")
+        pid = os.fork()
+        if pid > 0:
+            # Parent process: Exits so the Docker entrypoint continues to Nginx
+            return 
+            
+        # Child process: Continues as the background SIEM agent
+        # Redirect standard IO to avoid cluttering the Nginx logs
+        sys.stdout = open('/var/log/siem_agent.log', 'a',buffering=1)
+        sys.stderr = open('/var/log/siem_agent.err', 'a', buffering=1)
+
     # --- STEP 3: MONGODB CONNECTION ---
     client = None
     while True:
@@ -371,19 +388,6 @@ def main():
     # Do this before forking so the registry is updated immediately
     creating_hostname_collection(AGENT_HOSTNAME, client)
 
-    # --- STEP 5: DAEMONIZE FOR WEBSITE MODE ---
-    # If Nginx is present, we fork to run the agent as a background daemon
-    if os.path.exists("/usr/sbin/nginx"):
-        print("[*] Launching Nginx and backgrounding SIEM Agent...")
-        pid = os.fork()
-        if pid > 0:
-            # Parent process: Exits so the Docker entrypoint continues to Nginx
-            return 
-            
-        # Child process: Continues as the background SIEM agent
-        # Redirect standard IO to avoid cluttering the Nginx logs
-        sys.stdout = open(os.devnull, 'w')
-        sys.stderr = open(os.devnull, 'w')
 
     # --- STEP 6: START MONITORING THREADS ---
     # We use a list to keep track of our security modules
