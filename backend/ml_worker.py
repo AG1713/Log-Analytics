@@ -374,6 +374,7 @@ def predict_log(log):
         # ============================
         record = {
             "timestamp": datetime.utcnow(),
+            "hostname": log.get("hostname"),
             "attack": attack,
             "attack_type": attack_type,
             "confidence": confidence,

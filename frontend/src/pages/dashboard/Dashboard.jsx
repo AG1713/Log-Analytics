@@ -282,7 +282,7 @@ export default function Dashboard() {
         </Card>
 
         <Card style={{ display: "flex", flexDirection: "column" }}>
-          <CardLabel>ATTACKS BY PROTOCOL</CardLabel>
+          <CardLabel>LOGS BY PROTOCOL</CardLabel>
           <div style={{ flex: 1, minHeight: 0 }}>
             <ResponsiveContainer width="100%" height="100%" debounce={300}>
               <BarChart data={protocolData} layout="vertical" barSize={12}>
@@ -297,7 +297,7 @@ export default function Dashboard() {
         </Card>
 
         <Card style={{ display: "flex", flexDirection: "column" }}>
-          <CardLabel>ATTACKS BY SERVICE</CardLabel>
+          <CardLabel>LOGS BY SERVICE</CardLabel>
           <div style={{ flex: 1, minHeight: 0 }}>
             <ResponsiveContainer width="100%" height="100%" debounce={300}>
               <BarChart data={serviceData} layout="vertical" barSize={12}>
@@ -416,7 +416,7 @@ export default function Dashboard() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-                {["TIME", "SRC IP", "DST IP", "PROTO", "SERVICE", "ATTACK TYPE", "SEVERITY", "CONFIDENCE"].map(h => (
+                {["TIME", "HOSTNAME", "SRC IP", "DST IP", "PROTO", "SERVICE", "ATTACK TYPE", "SEVERITY", "CONFIDENCE"].map(h => (
                   <th key={h} style={{ textAlign: "left", padding: "6px 10px", color: "#1a3a5a", fontWeight: 500, fontSize: "10px", letterSpacing: "0.05em" }}>{h}</th>
                 ))}
               </tr>
@@ -424,7 +424,7 @@ export default function Dashboard() {
             <tbody>
               {networkLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ padding: "24px 10px", color: COLORS.muted, textAlign: "center", fontSize: "12px" }}>
+                  <td colSpan={9} style={{ padding: "24px 10px", color: COLORS.muted, textAlign: "center", fontSize: "12px" }}>
                     Waiting for packets...
                   </td>
                 </tr>
@@ -441,6 +441,9 @@ export default function Dashboard() {
                 >
                   <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "10px", whiteSpace: "nowrap" }}>
                     {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : "—"}
+                  </td>
+                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan, fontSize: "10px", whiteSpace: "nowrap" }}>
+                    {log.hostname || "—"}
                   </td>
                   <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan, fontSize: "10px", whiteSpace: "nowrap" }}>
                     {log.src_ip || "—"}
