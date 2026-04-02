@@ -172,13 +172,16 @@ export default function Dashboard() {
     const es = api.streamNetwork(selectedDevice);
 
     es.onmessage = (e) => {
-      try {
-        const incoming = JSON.parse(e.data);
-        if (!Array.isArray(incoming) || incoming.error) return;
-        setNetworkLogs(prev => [...incoming, ...prev].slice(0, 100));
-      } catch {}
-    };
-
+    try {
+      const incoming = JSON.parse(e.data);
+      if (!Array.isArray(incoming) || incoming.error) return;
+      setNetworkLogs(prev => {
+        const existingIds = new Set(prev.map(l => l._id));
+        const newOnly = incoming.filter(l => !existingIds.has(l._id));
+        return [...newOnly, ...prev].slice(0, 100);
+      });
+    } catch {}
+  };
     es.onerror = () => es.close();
     return () => es.close();
   }, [showNetworkLogs, selectedDevice]);
