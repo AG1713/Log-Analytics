@@ -129,10 +129,10 @@ print(classification_report(
 # 💾 SAVE MODELS
 # ============================
 
-joblib.dump(model, "binary_model.pkl")
-joblib.dump(proto_enc, "proto_enc.pkl")
-joblib.dump(service_enc, "service_enc.pkl")
-joblib.dump(attack_enc, "attack_enc.pkl")
-joblib.dump(scaler, "scaler.pkl")
+joblib.dump(model, "models/binary_model.pkl")
+joblib.dump(proto_enc, "models/proto_enc.pkl")
+joblib.dump(service_enc, "models/service_enc.pkl")
+joblib.dump(attack_enc, "models/attack_enc.pkl")
+joblib.dump(scaler, "models/scaler.pkl")
 
 print("\n✅ Model saved successfully!")

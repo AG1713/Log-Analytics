@@ -5,7 +5,7 @@ import argparse
 # 1. Setup Parser correctly
 parser = argparse.ArgumentParser()
 parser.add_argument("--targetIP", default="127.0.0.1")
-parser.add_argument("--targetPort", type=int, default=80)
+parser.add_argument("--targetPort", type=int, default=8080)
 args = parser.parse_args()
 
 print(f"Starting test against {args.targetIP}:{args.targetPort}...")

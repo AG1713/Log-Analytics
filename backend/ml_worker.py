@@ -242,19 +242,19 @@ db = client["siem_db"]
 # ============================
 # 📦 LOAD MODELS
 # ============================
-binary_model  = joblib.load("binary_model.pkl")
-stage1_model  = joblib.load("stage1_model.pkl")
-stage2_model  = joblib.load("stage2_model.pkl")
-stage3_model  = joblib.load("stage3_model.pkl")
+binary_model  = joblib.load("models/binary_model.pkl")
+stage1_model  = joblib.load("models/stage1_model.pkl")
+stage2_model  = joblib.load("models/stage2_model.pkl")
+stage3_model  = joblib.load("models/stage3_model.pkl")
 
-proto_enc   = joblib.load("proto_enc.pkl")
-service_enc = joblib.load("service_enc.pkl")
+proto_enc   = joblib.load("models/proto_enc.pkl")
+service_enc = joblib.load("models/service_enc.pkl")
 
-stage1_enc = joblib.load("stage1_enc.pkl")
-dos_enc    = joblib.load("dos_enc.pkl")
-rare_enc   = joblib.load("rare_enc.pkl")
+stage1_enc = joblib.load("models/stage1_enc.pkl")
+dos_enc    = joblib.load("models/dos_enc.pkl")
+rare_enc   = joblib.load("models/rare_enc.pkl")
 
-scaler = joblib.load("scaler.pkl")
+scaler = joblib.load("models/scaler.pkl")
 
 # ============================
 # ⚠️ SEVERITY MAP
