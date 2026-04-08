@@ -211,14 +211,27 @@ def process_packet(packet, logs_col):
             session["ackdat"] = (now - session["synack_time"]).total_seconds()
             session["synack_time"]=None
 
+    current_duration = (now - session["start_time"]).total_seconds()
     should_ship=False
+
     if packet.haslayer(TCP):
+        flags=packet[TCP].flags
         if 'F' in flags or 'R' in flags:
             session["state"]="FIN" if 'F' in flags else "RST"
             should_ship=True
+        elif (session["spkts"] + session["dpkts"]) >= 1 and session["state"] == "REQ" and current_duration>2:
+            session["state"] = "INT"
+            should_ship = True
+
     elif proto_map=="udp":
-        if session["dpkts"] >=1:
+        if session["dpkts"] >=1 or current_duration>5:
             should_ship=True
+            
+    elif current_duration > 10:
+        should_ship = True
+
+    if (session["spkts"] + session["dpkts"]) > 50:
+        should_ship = True
 
     if should_ship:
         duration = (now - session["start_time"]).total_seconds()
@@ -240,16 +253,12 @@ def process_packet(packet, logs_col):
                 }
         if final_log["dst_port"] not in [27017, 8000] and final_log["src_port"] not in [27017, 8000]:
             try:
-                # requests.post(NETWORK_BACKEND_URL, json=final_log, timeout=15)
-                #print(final_log)
-                logs_col.insert_one(final_log)
+                requests.post(NETWORK_BACKEND_URL, json=final_log, timeout=15)
             except Exception: pass
 
         del sessions[flow_key]
 
 def start_network_sniffer(client):
-    db = client.siem_db
-    logs_col = db.network_logs
     print("[*] Network Sniffer active. Capturing traffic...")
     sniff(prn=lambda pkt: process_packet(pkt, logs_col), store=0)
 
@@ -365,7 +374,7 @@ def main():
             description = "This is agent.py for windows"
             )
     parser.add_argument("--siem_db_url",type=str, default="mongodb://localhost:27017/", help="used to provide the siem database url")
-    parser.add_argument("--network_backend_url",type=str, default="http://172.17.0.1:8000/api/network/alerts", help="used to provide the network alert to backend")
+    parser.add_argument("--network_backend_url",type=str, default="http://172.17.0.1:8000/api/logs", help="used to provide the network alert to backend")
     parser.add_argument("--config_url",type=str, default="http://localhost:8000/api/config",help="used to provide the config url")
     parser.add_argument("--backend_url",type=str, default="http://localhost:8000/api/alerts",help="used to provide backend url")
     parser.add_argument("--agent_hostname",type=str, default="no_nameHostname", help="used to provide agent hostname")

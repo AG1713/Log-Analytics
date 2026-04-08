@@ -168,7 +168,7 @@ def process_packet(packet):
     elif current_duration > 10: 
         should_ship = True
         
-    if (session["spkts"] + session["dpkts"]) > 1:
+    if (session["spkts"] + session["dpkts"]) > 50:
         should_ship = True
     # 7. Ship to MongoDB and Clear Session
     if should_ship:
@@ -194,7 +194,10 @@ def process_packet(packet):
         print(f"Shipping Flow: {src_ip} -> {dst_ip} ({session['state']})")
         
         # Filter DB noise
-        if final_log["dst_port"] not in [27017, 8000] and final_log["src_port"] not in [27017,8000]:
+        temp=NETWORK_BACKEND_URL
+
+        ip = temp.split("//")[1].split(":")[0]
+        if final_log["dst_port"] not in [27018, 8000] and final_log["src_port"] not in [27018,8000]:
             try:
                 print(f"[+] Attempting the ship logs to {NETWORK_BACKEND_URL}")
                 response = requests.post(NETWORK_BACKEND_URL, json=final_log, timeout=15)
