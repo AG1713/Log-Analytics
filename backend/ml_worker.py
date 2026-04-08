@@ -380,7 +380,9 @@ def predict_log(log):
             "confidence": confidence,
             "severity": SEVERITY_MAP.get(attack_type, "normal"),
             "src_ip": log.get("src_ip"),
+            "src_port": log.get("src_port"),
             "dst_ip": log.get("dst_ip", "unknown"),
+            "dst_port": log.get("dst_port"),
             "proto": log.get("proto", "unknown"),
             "service": log.get("service", "unknown"),
         }

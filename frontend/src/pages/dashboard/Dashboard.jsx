@@ -416,7 +416,7 @@ export default function Dashboard() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-                {["TIME", "HOSTNAME", "SRC IP", "DST IP", "PROTO", "SERVICE", "ATTACK TYPE", "SEVERITY", "CONFIDENCE"].map(h => (
+                {["TIME", "HOSTNAME", "SRC IP", "SRC_PORT", "DST IP", "DST_PORT", "PROTO", "SERVICE", "ATTACK TYPE", "SEVERITY", "CONFIDENCE"].map(h => (
                   <th key={h} style={{ textAlign: "left", padding: "6px 10px", color: "#1a3a5a", fontWeight: 500, fontSize: "10px", letterSpacing: "0.05em" }}>{h}</th>
                 ))}
               </tr>
@@ -424,7 +424,7 @@ export default function Dashboard() {
             <tbody>
               {networkLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={9} style={{ padding: "24px 10px", color: COLORS.muted, textAlign: "center", fontSize: "12px" }}>
+                  <td colSpan={11} style={{ padding: "24px 10px", color: COLORS.muted, textAlign: "center", fontSize: "12px" }}>
                     Waiting for packets...
                   </td>
                 </tr>
@@ -448,8 +448,14 @@ export default function Dashboard() {
                   <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan, fontSize: "10px", whiteSpace: "nowrap" }}>
                     {log.src_ip || "—"}
                   </td>
+                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan, fontSize: "10px", whiteSpace: "nowrap" }}>
+                    {log.src_port || "—"}
+                  </td>
                   <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.text, fontSize: "10px", whiteSpace: "nowrap" }}>
                     {log.dst_ip || "—"}
+                  </td>
+                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan, fontSize: "10px", whiteSpace: "nowrap" }}>
+                    {log.dst_port || "—"}
                   </td>
                   <td style={{ padding: "7px 10px" }}>
                     <ProtoBadge proto={log.proto} />
