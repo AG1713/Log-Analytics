@@ -8,6 +8,7 @@ import os
 import threading
 from scapy.all import sniff, IP, TCP, UDP
 from datetime import datetime, timezone
+import statistics
 import getpass
 import argparse
 
@@ -86,14 +87,14 @@ def process_packet(packet):
     now = datetime.now(timezone.utc)
     src_ip = packet[IP].src
     dst_ip = packet[IP].dst
-    proto_str = PROTO_MAP.get(packet[IP].proto, "other")
+    proto_num = packet[IP].proto
+    proto_str = PROTO_MAP.get(proto_num, "other")
     
     # Identify ports
     sport = packet[TCP].sport if packet.haslayer(TCP) else (packet[UDP].sport if packet.haslayer(UDP) else 0)
     dport = packet[TCP].dport if packet.haslayer(TCP) else (packet[UDP].dport if packet.haslayer(UDP) else 0)
 
     # 1. Create a unique key for the flow (Direction Neutral)
-    # We use sorted IPs/Ports so (A->B) and (B->A) hit the same session
     flow_key = tuple(sorted([(src_ip, sport), (dst_ip, dport)]))
 
     # 2. Initialize new session
@@ -102,7 +103,7 @@ def process_packet(packet):
             "hostname": AGENT_HOSTNAME,
             "start_time": now,
             "last_packet_time": now,
-            "src_ip": src_ip, "dst_ip": dst_ip, # The first packet defines the 'Source'
+            "src_ip": src_ip, "dst_ip": dst_ip,
             "src_port": sport, "dst_port": dport,
             "proto": proto_str,
             "sbytes": 0, "dbytes": 0,
@@ -111,70 +112,85 @@ def process_packet(packet):
             "stcpb": packet[TCP].seq if packet.haslayer(TCP) else 0, "dtcpb": 0,
             "syn_time": now if (packet.haslayer(TCP) and 'S' in packet[TCP].flags) else None,
             "synack_time": None,
-            "ackdat": 0, "synack": 0,
-            "state": "REQ"
+            "synack": 0, "ackdat": 0,
+            "state": "REQ",
+            # New Tracking Fields
+            "timestamps": [now.timestamp()],
+            "syn_count": 0, "ack_count": 0, "fin_count": 0, "rst_count": 0,
+            "ports_seen": {dport}
         }
 
     session = sessions[flow_key]
-    
-    # 3. Determine direction (Is this packet from the Source or the Destination?)
     is_source = (src_ip == session["src_ip"] and sport == session["src_port"])
-    
-    # 4. Update metrics (Aggregation)
     pkt_len = len(packet)
+    
+    # Update core counters
+    session["timestamps"].append(now.timestamp())
+    session["last_packet_time"] = now
+    
     if is_source:
         session["sbytes"] += pkt_len
         session["spkts"] += 1
-        session["last_packet_time"] = now
     else:
         session["dbytes"] += pkt_len
         session["dpkts"] += 1
         if session["dttl"] == 0: session["dttl"] = packet[IP].ttl
         if session["dtcpb"] == 0 and packet.haslayer(TCP): session["dtcpb"] = packet[TCP].seq
 
-    # 5. Handle TCP Handshake Timing (matching synack/ackdat)
+    # Track TCP Flags
     if packet.haslayer(TCP):
         flags = packet[TCP].flags
-        # If SYN-ACK from destination
+        if 'S' in flags: session["syn_count"] += 1
+        if 'A' in flags: session["ack_count"] += 1
+        if 'F' in flags: session["fin_count"] += 1
+        if 'R' in flags: session["rst_count"] += 1
+        
+        # Handshake Logic
         if not is_source and 'S' in flags and 'A' in flags:
             if session["syn_time"]:
                 session["synack"] = (now - session["syn_time"]).total_seconds()
                 session["synack_time"] = now
             session["state"] = "CON"
-        # If ACK from source completing handshake
         elif is_source and 'A' in flags and session["synack_time"]:
             session["ackdat"] = (now - session["synack_time"]).total_seconds()
-            session["synack_time"] = None # Reset so we don't recalculate
+            session["synack_time"] = None
 
-    # 6. Check for Termination OR Timeout/Volume
-    current_duration = (now - session["start_time"]).total_seconds()
+    # 6. Termination & Shipping Logic
+    duration = (now - session["start_time"]).total_seconds()
     should_ship = False
 
-    # Ship if: TCP closed, OR UDP has response, OR session is > 10 seconds, OR > 50 packets
-    if packet.haslayer(TCP):
-        flags = packet[TCP].flags # Moved inside the check
-        if 'F' in flags or 'R' in flags:
-            session["state"] = "FIN" if 'F' in flags else "RST"
-            should_ship = True
-        elif (session["spkts"] + session["dpkts"]) >= 1 and session["state"] == "REQ" and current_duration > 2:
-            # This captures spoofed SYN floods faster for your SIEM
-            session["state"] = "INT" # 'INT' for Interrupted/Incomplete
-            should_ship = True
-            
-    elif proto_str == "udp":
-        if session["dpkts"] >= 1 or current_duration > 5:
-            should_ship = True
+    # Check for forced termination
+    if packet.haslayer(TCP) and ('F' in packet[TCP].flags or 'R' in packet[TCP].flags):
+        session["state"] = "FIN" if 'F' in packet[TCP].flags else "RST"
+        should_ship = True
+    elif duration >= 10: # Keep duration at 10 seconds as requested
+        should_ship = True
+    elif (session["spkts"] + session["dpkts"]) > 50:
+        should_ship = True
 
-    elif current_duration > 10: 
-        should_ship = True
-        
-    if (session["spkts"] + session["dpkts"]) > 50:
-        should_ship = True
-    # 7. Ship to MongoDB and Clear Session
     if should_ship:
-        duration = (now - session["start_time"]).total_seconds()
+        # If we didn't see a SYN but we saw traffic in both directions, 
+        # it's an established connection we caught mid-stream.
+        if session["syn_count"] == 0 and (session["spkts"] > 0 and session["dpkts"] > 0):
+            session["state"] = "CON" 
+        elif session["syn_count"] > 0 and session["dpkts"] == 0:
+            session["state"] = "INT" # Interrupted / No response (common in SYN floods)
+
+        # Calculate IAT (Inter-Arrival Times)
+        iat_list = [t2 - t1 for t1, t2 in zip(session["timestamps"], session["timestamps"][1:])]
+        mean_iat = statistics.mean(iat_list) if iat_list else 0
+        std_iat = statistics.stdev(iat_list) if len(iat_list) > 1 else 0
         
-        # Calculate final log matching UNSW-NB15 structure
+        total_pkts = session["spkts"] + session["dpkts"]
+        total_bytes = session["sbytes"] + session["dbytes"]
+        
+        # Determine Service (Simple mapping by destination port)
+        service = "-"
+        if session["dst_port"] in SERVICE_MAP:
+            service = SERVICE_MAP.get(session["dst_port"], "-")
+        elif session["src_port"] in SERVICE_MAP:
+            service = SERVICE_MAP.get(session["src_port"], "-")
+
         final_log = {
             "hostname": session["hostname"],
             "timestamp": now.isoformat(),
@@ -182,31 +198,37 @@ def process_packet(packet):
             "src_port": session["src_port"], "dst_port": session["dst_port"],
             "proto": session["proto"],
             "state": session["state"],
+            "service": service,
             "dur": duration,
+            "spkts": session["spkts"], "dpkts": session["dpkts"],
             "sbytes": session["sbytes"], "dbytes": session["dbytes"],
-            "spkts":session["spkts"], "dpkts":session["dpkts"],
             "sttl": session["sttl"], "dttl": session["dttl"],
-            "stcpb": session["stcpb"], "dtcpb": session["dtcpb"],
             "synack": session["synack"], "ackdat": session["ackdat"],
+            "stcpb": session["stcpb"], "dtcpb": session["dtcpb"],
+            # Engineered Features
+            "rate": (total_bytes / duration) if duration > 0 else 0,
+            "pkt_rate": (total_pkts / duration) if duration > 0 else 0,
+            "byte_rate": (total_bytes / duration) if duration > 0 else 0,
+            "flow_ratio": session["spkts"] / (session["dpkts"] + 1),
+            "syn_count": session["syn_count"],
+            "ack_count": session["ack_count"],
+            "fin_count": session["fin_count"],
+            "rst_count": session["rst_count"],
+            "mean_iat": mean_iat,
+            "std_iat": std_iat,
+            "flow_packets": total_pkts,
+            "port_count": len(session["ports_seen"]), # Usually 1 per flow unless tracking source wide
             "processed": False
         }
 
-        print(f"Shipping Flow: {src_ip} -> {dst_ip} ({session['state']})")
-        
-        # Filter DB noise
-        temp=NETWORK_BACKEND_URL
-
-        ip = temp.split("//")[1].split(":")[0]
-        if final_log["dst_port"] not in [27018, 8000] and final_log["src_port"] not in [27018,8000]:
+        # Filter and Send
+        if final_log["dst_port"] not in [27018, 8000] and final_log["src_port"] not in [27018, 8000]:
             try:
-                print(f"[+] Attempting the ship logs to {NETWORK_BACKEND_URL}")
-                response = requests.post(NETWORK_BACKEND_URL, json=final_log, timeout=15)
-                print(f"[+] Server Response: {response.status_code}-{response.text}")
+                requests.post(NETWORK_BACKEND_URL, json=final_log, timeout=10)
             except Exception as e:
-                print(f"[!] Failed to ship log {e}")
+                print(f"[!] Shipping failed: {e}")
         
         del sessions[flow_key]
-
 
 def start_network_sniffer(client):
     #db = client.siem_db
