@@ -4,7 +4,7 @@ import numpy as np
 import time
 from collections import defaultdict
 
-MONGO_URL = "mongodb://localhost:27017"
+MONGO_URL = "mongodb://localhost:27018"
 
 # ============================
 # 📦 LOAD MODELS + ENCODERS
@@ -34,6 +34,33 @@ except Exception as e:
 
 
 # ============================
+# 🆕 DETECT NORMAL CLASS INDEX
+# ============================
+NORMAL_CLASS_INDEX = None
+try:
+    if hasattr(binary_model, "classes_"):
+        classes = list(binary_model.classes_)
+        if "Normal" in classes:
+            NORMAL_CLASS_INDEX = classes.index("Normal")
+except:
+    NORMAL_CLASS_INDEX = None
+
+
+# ============================
+# 🆕 PROBABILITY FIX FUNCTION
+# ============================
+def get_attack_probability(probs):
+    try:
+        if NORMAL_CLASS_INDEX is not None:
+            prob_normal = probs[NORMAL_CLASS_INDEX]
+            return 1 - prob_normal, prob_normal
+        else:
+            return max(probs), 1 - max(probs)
+    except:
+        return max(probs), 1 - max(probs)
+
+
+# ============================
 # ⚠️ SEVERITY MAP
 # ============================
 SEVERITY_MAP = {
@@ -52,7 +79,7 @@ BASELINE_SERVICES = set()
 LAST_SEEN = defaultdict(float)
 
 # ============================
-# 🔧 SAFE ENCODING (FIXED)
+# 🔧 SAFE ENCODING
 # ============================
 def safe_transform(encoder, value):
     try:
@@ -70,14 +97,14 @@ def safe_transform(encoder, value):
 # ============================
 def preprocess(log):
     try:
-        # 🚫 HARD FILTER
+        # 🚫 HARD FILTER (relaxed slightly)
         if log.get("src_ip") in ["127.0.0.1", "0.0.0.0"]:
             return None
 
         if float(log.get("spkts", 0)) == 0 and float(log.get("dpkts", 0)) == 0:
             return None
 
-        if float(log.get("sbytes", 0)) < 50 and float(log.get("dbytes", 0)) < 50:
+        if float(log.get("sbytes", 0)) < 30 and float(log.get("dbytes", 0)) < 30:
             return None
 
         if log.get("proto") not in ["tcp", "udp"]:
@@ -156,19 +183,19 @@ def predict(log):
         src_ip = log.get("src_ip")
         service = log.get("service")
 
-        # 🧠 BASELINE
+        # 🧠 BASELINE (relaxed)
         BASELINE_IPS.add(src_ip)
         BASELINE_SERVICES.add(service)
 
         if src_ip in BASELINE_IPS and service in BASELINE_SERVICES:
-            if float(log.get("spkts", 0)) < 5:
+            if float(log.get("spkts", 0)) < 2:
                 return None
 
-        # ⏱️ RATE LIMIT
+        # ⏱️ RATE LIMIT (faster detection)
         key = f"{src_ip}-{service}"
         now = time.time()
 
-        if now - LAST_SEEN[key] < 5:
+        if now - LAST_SEEN[key] < 2:
             return None
 
         LAST_SEEN[key] = now
@@ -178,18 +205,22 @@ def predict(log):
         if features is None:
             return None
 
+        # ============================
+        # 🔥 FIXED PROBABILITY
+        # ============================
         probs = binary_model.predict_proba(features)[0]
-        attack_prob = float(probs[1])
-        benign_prob = float(probs[0])
+        attack_prob, benign_prob = get_attack_probability(probs)
 
-        # 🔥 STRICT DECISION
-        if attack_prob >= 0.85:
+        # ============================
+        # 🔥 RELAXED THRESHOLD
+        # ============================
+        if attack_prob >= 0.5:
             attack_label = predict_attack_type(features)
 
             result = {
                 "prediction": "Attack",
                 "attack_type": attack_label,
-                "confidence": round(attack_prob, 4),
+                "confidence": round(float(attack_prob), 4),
                 "anomaly": True,
                 "severity": SEVERITY_MAP.get(attack_label, "medium")
             }
@@ -198,13 +229,13 @@ def predict(log):
             result = {
                 "prediction": "Normal",
                 "attack_type": "None",
-                "confidence": round(benign_prob, 4),
+                "confidence": round(float(benign_prob), 4),
                 "anomaly": False,
                 "severity": "normal"
             }
 
-        # 🧼 CLEAN MODE
-        if float(log.get("spkts", 0)) < 3 and float(log.get("sbytes", 0)) < 200:
+        # 🧼 CLEAN MODE (relaxed)
+        if float(log.get("spkts", 0)) < 2 and float(log.get("sbytes", 0)) < 100:
             result["prediction"] = "Normal"
             result["attack_type"] = "None"
             result["anomaly"] = False
@@ -223,7 +254,7 @@ def predict(log):
 
 
 # ============================
-# 📊 ATTACK SUMMARY (REAL-TIME FIX)
+# 📊 ATTACK SUMMARY
 # ============================
 def generate_attack_summary():
     try:

