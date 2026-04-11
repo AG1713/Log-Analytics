@@ -10,6 +10,7 @@ import winreg
 import threading
 from scapy.all import sniff, IP, TCP, UDP, ICMP
 from datetime import datetime, timezone
+from collections import defaultdict
 import argparse
 
 PROTOCOL_MAP = {6: "tcp", 17: "udp", 1: "icmp"}
@@ -21,6 +22,24 @@ SIEM_DB_URL = ""
 NETWORK_BACKEND_URL = ""
 CONFIG_URL = ""
 BACKEND_URL=""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NEW FEATURE: Per-IP tracking windows (for connections_per_ip_window,
+#              unique_ports_per_ip, failed_connection_ratio)
+# ─────────────────────────────────────────────────────────────────────────────
+IP_WINDOW_SECONDS = 60          # sliding window width (seconds)
+ip_conn_times      = defaultdict(list)   # src_ip -> [timestamps of connections]
+ip_ports_seen      = defaultdict(set)    # src_ip -> {dst_ports contacted}
+ip_failed_counts   = defaultdict(int)    # src_ip -> count of failed (INT/RST) flows
+ip_total_counts    = defaultdict(int)    # src_ip -> total flows initiated
+ip_lock            = threading.Lock()    # thread-safety for the dicts above
+
+
+def _prune_window(src_ip, now_ts):
+    """Remove connection timestamps outside the sliding window for src_ip."""
+    cutoff = now_ts - IP_WINDOW_SECONDS
+    ip_conn_times[src_ip] = [t for t in ip_conn_times[src_ip] if t >= cutoff]
 
 
 def is_admin():
@@ -163,7 +182,7 @@ def process_packet(packet):
     src_ip = packet[IP].src
     dst_ip = packet[IP].dst
     proto_num = packet[IP].proto
-    proto_str = PROTO_MAP.get(proto_num, "other")
+    proto_str = PROTOCOL_MAP.get(proto_num, "other")
     
     # Identify ports
     sport = packet[TCP].sport if packet.haslayer(TCP) else (packet[UDP].sport if packet.haslayer(UDP) else 0)
@@ -189,11 +208,19 @@ def process_packet(packet):
             "synack_time": None,
             "synack": 0, "ackdat": 0,
             "state": "REQ",
-            # New Tracking Fields
+            # Existing Tracking Fields
             "timestamps": [now.timestamp()],
             "syn_count": 0, "ack_count": 0, "fin_count": 0, "rst_count": 0,
             "ports_seen": {dport}
         }
+
+        # ── NEW: register this new connection in the per-IP window tracker ──
+        now_ts = now.timestamp()
+        with ip_lock:
+            _prune_window(src_ip, now_ts)
+            ip_conn_times[src_ip].append(now_ts)
+            ip_ports_seen[src_ip].add(dport)
+            ip_total_counts[src_ip] += 1
 
     session = sessions[flow_key]
     is_source = (src_ip == session["src_ip"] and sport == session["src_port"])
@@ -251,12 +278,17 @@ def process_packet(packet):
         elif session["syn_count"] > 0 and session["dpkts"] == 0:
             session["state"] = "INT" # Interrupted / No response (common in SYN floods)
 
+        # ── NEW: mark failed flows for failed_connection_ratio ──
+        if session["state"] in ("INT", "RST"):
+            with ip_lock:
+                ip_failed_counts[session["src_ip"]] += 1
+
         # Calculate IAT (Inter-Arrival Times)
         iat_list = [t2 - t1 for t1, t2 in zip(session["timestamps"], session["timestamps"][1:])]
         mean_iat = statistics.mean(iat_list) if iat_list else 0
-        std_iat = statistics.stdev(iat_list) if len(iat_list) > 1 else 0
+        std_iat  = statistics.stdev(iat_list) if len(iat_list) > 1 else 0
         
-        total_pkts = session["spkts"] + session["dpkts"]
+        total_pkts  = session["spkts"] + session["dpkts"]
         total_bytes = session["sbytes"] + session["dbytes"]
         
         # Determine Service (Simple mapping by destination port)
@@ -265,6 +297,52 @@ def process_packet(packet):
             service = SERVICE_MAP.get(session["dst_port"], "-")
         elif session["src_port"] in SERVICE_MAP:
             service = SERVICE_MAP.get(session["src_port"], "-")
+
+        # ── NEW FEATURES ─────────────────────────────────────────────────────
+
+        # 1. flow_bytes – total bytes exchanged in this flow (sbytes + dbytes)
+        flow_bytes = total_bytes
+
+        # 2. bytes_per_pkt – average bytes per packet across the whole flow
+        bytes_per_pkt = (total_bytes / total_pkts) if total_pkts > 0 else 0
+
+        # 3. syn_ratio – fraction of packets that carried a SYN flag
+        #    High values (near 1.0) indicate SYN-flood style behaviour
+        syn_ratio = (session["syn_count"] / total_pkts) if total_pkts > 0 else 0
+
+        # 4. ack_ratio – fraction of packets that carried an ACK flag
+        #    Normal established flows hover around 1.0; very low values are suspicious
+        ack_ratio = (session["ack_count"] / total_pkts) if total_pkts > 0 else 0
+
+        # 5. rst_ratio – fraction of packets that carried a RST flag
+        #    Elevated values suggest port-scanning or aggressive connection teardown
+        rst_ratio = (session["rst_count"] / total_pkts) if total_pkts > 0 else 0
+
+        # 6. iat_ratio – coefficient of variation of inter-arrival times (std / mean)
+        #    High value → bursty / irregular traffic; low value → steady stream
+        iat_ratio = (std_iat / mean_iat) if mean_iat > 0 else 0
+
+        # 7–9  Per-IP window metrics (thread-safe snapshot)
+        flow_src_ip = session["src_ip"]
+        now_ts = now.timestamp()
+        with ip_lock:
+            _prune_window(flow_src_ip, now_ts)
+
+            # 7. unique_ports_per_ip – distinct dst ports this src IP has
+            #    contacted since agent start (port-scan indicator)
+            unique_ports_per_ip = len(ip_ports_seen[flow_src_ip])
+
+            # 8. connections_per_ip_window – how many connections this src IP
+            #    has opened inside the last IP_WINDOW_SECONDS seconds
+            connections_per_ip_window = len(ip_conn_times[flow_src_ip])
+
+            # 9. failed_connection_ratio – ratio of failed (INT / RST) flows
+            #    to total flows for this src IP since agent start
+            total_for_ip  = ip_total_counts[flow_src_ip]
+            failed_for_ip = ip_failed_counts[flow_src_ip]
+            failed_connection_ratio = (failed_for_ip / total_for_ip) if total_for_ip > 0 else 0
+
+        # ─────────────────────────────────────────────────────────────────────
 
         final_log = {
             "hostname": session["hostname"],
@@ -280,7 +358,7 @@ def process_packet(packet):
             "sttl": session["sttl"], "dttl": session["dttl"],
             "synack": session["synack"], "ackdat": session["ackdat"],
             "stcpb": session["stcpb"], "dtcpb": session["dtcpb"],
-            # Engineered Features
+            # Original Engineered Features
             "rate": (total_bytes / duration) if duration > 0 else 0,
             "pkt_rate": (total_pkts / duration) if duration > 0 else 0,
             "byte_rate": (total_bytes / duration) if duration > 0 else 0,
@@ -292,7 +370,18 @@ def process_packet(packet):
             "mean_iat": mean_iat,
             "std_iat": std_iat,
             "flow_packets": total_pkts,
-            "port_count": len(session["ports_seen"]), # Usually 1 per flow unless tracking source wide
+            "port_count": len(session["ports_seen"]),
+            # ── NEW Features ──────────────────────────────────────────────────
+            "flow_bytes": flow_bytes,                                # total bytes in flow
+            "bytes_per_pkt": bytes_per_pkt,                          # avg bytes / packet
+            "syn_ratio": syn_ratio,                                  # SYN pkts / total pkts
+            "ack_ratio": ack_ratio,                                  # ACK pkts / total pkts
+            "rst_ratio": rst_ratio,                                  # RST pkts / total pkts
+            "iat_ratio": iat_ratio,                                  # std_iat / mean_iat (CoV)
+            "unique_ports_per_ip": unique_ports_per_ip,              # distinct dst ports (src IP)
+            "connections_per_ip_window": connections_per_ip_window,  # conns in sliding window
+            "failed_connection_ratio": failed_connection_ratio,      # failed / total (src IP)
+            # ─────────────────────────────────────────────────────────────────
             "processed": False
         }
 
