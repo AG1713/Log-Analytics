@@ -35,7 +35,7 @@ WORKDIR /home/attacker
 COPY user.txt rockyou.txt attack.py ./
 
 # Optional Python dependency example
-# RUN pip3 install --break-system-packages paramiko
+RUN pip3 install --break-system-packages boofuzz 
 
 # Give packet tools capabilities inside the image
 RUN setcap 'cap_net_raw,cap_net_admin+eip' "$(readlink -f /usr/sbin/hping3)" && \
