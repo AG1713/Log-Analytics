@@ -464,7 +464,7 @@ export default function Dashboard() {
                     {log.service && log.service !== "-" ? log.service.toUpperCase() : "—"}
                   </td>
                   <td style={{ padding: "7px 10px" }}>
-                    <AttackBadge attack={log.attack} />
+                    <AttackBadge attack={log.attack_type} />
                   </td>
                   <td style={{ padding: "7px 10px" }}>
                     <SeverityBadge severity={log.severity} />
