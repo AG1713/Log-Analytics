@@ -1,0 +1,379 @@
+=================================================================
+UNSW-NB15 ACTUAL FEATURE DISTRIBUTIONS
+=================================================================
+Total rows: 257,673
+
+
+=== CLASS COUNTS ===
+  Normal              :  93,000
+  Generic             :  58,871
+  Exploits            :  44,525
+  Fuzzers             :  24,246
+  DoS                 :  16,353
+  Reconnaissance      :  13,987
+  Analysis            :   2,677
+  Backdoor            :   2,329
+  Shellcode           :   1,511
+  Worms               :     174
+
+
+=== CONTINUOUS FEATURES ===
+
+--- sbytes ---
+  DoS             : mean=18360.7938  median=200.0000  std=311586.2613  p25=200.0000  p75=754.0000
+  Backdoor        : mean=1520.8617  median=200.0000  std=13017.8685  p25=200.0000  p75=200.0000
+  Analysis        : mean=839.6451  median=200.0000  std=8549.1386  p25=200.0000  p75=794.0000
+  Normal          : mean=4092.4444  median=1040.0000  std=12903.4102  p25=498.0000  p75=2934.0000
+  Reconnaissance  : mean=751.3813  median=564.0000  std=7151.9551  p25=168.0000  p75=564.0000
+  Generic         : mean=446.2890  median=114.0000  std=26049.2467  p25=114.0000  p75=114.0000
+
+--- dbytes ---
+  DoS             : mean=21747.1337  median=  0.0000  std=413967.0855  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=295.2941  median=  0.0000  std=2682.2127  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=296.1845  median=  0.0000  std=603.1470  p25=  0.0000  p75=  0.0000
+  Normal          : mean=26138.1974  median=642.0000  std=128713.6636  p25=178.0000  p75=8010.0000
+  Reconnaissance  : mean=1797.0892  median= 96.0000  std=95781.3152  p25=  0.0000  p75=354.0000
+  Generic         : mean=1319.7140  median=  0.0000  std=55316.6694  p25=  0.0000  p75=  0.0000
+
+--- spkts ---
+  DoS             : mean= 24.1173  median=  2.0000  std=243.8673  p25=  2.0000  p75= 10.0000
+  Backdoor        : mean=  6.7673  median=  2.0000  std= 18.5567  p25=  2.0000  p75=  2.0000
+  Analysis        : mean=  5.3549  median=  2.0000  std= 12.2346  p25=  2.0000  p75= 10.0000
+  Normal          : mean= 27.5632  median= 10.0000  std= 53.2986  p25=  4.0000  p75= 30.0000
+  Reconnaissance  : mean=  7.0346  median= 10.0000  std= 14.8539  p25=  2.0000  p75= 10.0000
+  Generic         : mean=  2.5768  median=  2.0000  std= 20.7684  p25=  2.0000  p75=  2.0000
+
+--- dpkts ---
+  DoS             : mean= 21.2523  median=  0.0000  std=311.7247  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  1.4590  median=  0.0000  std=  4.3576  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  2.1233  median=  0.0000  std=  3.9735  p25=  0.0000  p75=  0.0000
+  Normal          : mean= 33.0279  median=  8.0000  std= 97.4570  p25=  2.0000  p75= 24.0000
+  Reconnaissance  : mean=  4.9838  median=  2.0000  std= 71.0088  p25=  0.0000  p75=  8.0000
+  Generic         : mean=  1.1599  median=  0.0000  std= 40.9750  p25=  0.0000  p75=  0.0000
+
+--- dur ---
+  DoS             : mean=  2.4488  median=  0.0000  std= 10.1037  p25=  0.0000  p75=  0.2752
+  Backdoor        : mean=  2.2246  median=  0.0000  std=  9.6183  p25=  0.0000  p75=  0.0001
+  Analysis        : mean=  1.4169  median=  0.0000  std=  7.2202  p25=  0.0000  p75=  0.4923
+  Normal          : mean=  1.0154  median=  0.0539  std=  4.5594  p25=  0.0017  p75=  0.7505
+  Reconnaissance  : mean=  1.0050  median=  0.1945  std=  4.9296  p25=  0.0000  p75=  0.8509
+  Generic         : mean=  0.0612  median=  0.0000  std=  1.2757  p25=  0.0000  p75=  0.0000
+
+--- rate ---
+  DoS             : mean=146165.8970  median=111111.1072  std=179734.4976  p25= 67.0310  p75=200000.0051
+  Backdoor        : mean=149210.0492  median=111111.1072  std=171459.3412  p25= 89.3331  p75=200000.0051
+  Analysis        : mean=147808.3213  median=111111.1072  std=175887.7779  p25= 34.5342  p75=200000.0051
+  Normal          : mean=19588.2902  median=642.3257  std=83966.0698  p25= 27.4764  p75=3161.4985
+  Reconnaissance  : mean=99718.7265  median= 75.6785  std=169713.1443  p25= 19.7166  p75=125000.0003
+  Generic         : mean=209833.2008  median=125000.0003  std=185445.3578  p25=111111.1072  p75=250000.0006
+
+--- sttl ---
+  DoS             : mean=230.8610  median=254.0000  std= 63.3381  p25=254.0000  p75=254.0000
+  Backdoor        : mean=247.8351  median=254.0000  std= 35.8915  p25=254.0000  p75=254.0000
+  Analysis        : mean=210.0366  median=254.0000  std= 80.7978  p25=254.0000  p75=254.0000
+  Normal          : mean= 94.8901  median= 31.0000  std=100.4029  p25= 31.0000  p75=254.0000
+  Reconnaissance  : mean=253.0152  median=254.0000  std= 14.6687  p25=254.0000  p75=254.0000
+  Generic         : mean=252.4860  median=254.0000  std= 17.0611  p25=254.0000  p75=254.0000
+
+--- dttl ---
+  DoS             : mean= 52.7449  median=  0.0000  std=101.5084  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean= 36.5719  median=  0.0000  std= 87.0072  p25=  0.0000  p75=  0.0000
+  Analysis        : mean= 58.7314  median=  0.0000  std=106.3990  p25=  0.0000  p75=  0.0000
+  Normal          : mean= 81.8487  median= 29.0000  std=100.0451  p25= 29.0000  p75=252.0000
+  Reconnaissance  : mean=125.6823  median= 60.0000  std=125.8276  p25=  0.0000  p75=252.0000
+  Generic         : mean=  4.3480  median=  0.0000  std= 32.6924  p25=  0.0000  p75=  0.0000
+
+--- synack ---
+  DoS             : mean=  0.0110  median=  0.0000  std=  0.0279  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.0084  median=  0.0000  std=  0.0259  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.0196  median=  0.0000  std=  0.0394  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.0268  median=  0.0005  std=  0.0735  p25=  0.0000  p75=  0.0326
+  Reconnaissance  : mean=  0.0286  median=  0.0000  std=  0.0400  p25=  0.0000  p75=  0.0567
+  Generic         : mean=  0.0010  median=  0.0000  std=  0.0090  p25=  0.0000  p75=  0.0000
+
+--- ackdat ---
+  DoS             : mean=  0.0123  median=  0.0000  std=  0.0279  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.0093  median=  0.0000  std=  0.0264  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.0176  median=  0.0000  std=  0.0358  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.0223  median=  0.0001  std=  0.0583  p25=  0.0000  p75=  0.0254
+  Reconnaissance  : mean=  0.0315  median=  0.0000  std=  0.0387  p25=  0.0000  p75=  0.0558
+  Generic         : mean=  0.0011  median=  0.0000  std=  0.0092  p25=  0.0000  p75=  0.0000
+
+--- log_sbytes ---
+  DoS             : mean=  6.0209  median=  5.3033  std=  1.5057  p25=  5.3033  p75=  6.6267
+  Backdoor        : mean=  5.6927  median=  5.3033  std=  1.0225  p25=  5.3033  p75=  5.3033
+  Analysis        : mean=  5.7277  median=  5.3033  std=  0.8113  p25=  5.3033  p75=  6.6783
+  Normal          : mean=  6.9471  median=  6.9479  std=  1.5948  p25=  6.2126  p75=  7.9845
+  Reconnaissance  : mean=  5.8779  median=  6.3368  std=  0.7829  p25=  5.1299  p75=  6.3368
+  Generic         : mean=  4.8114  median=  4.7449  std=  0.4619  p25=  4.7449  p75=  4.7449
+
+--- log_dbytes ---
+  DoS             : mean=  1.6396  median=  0.0000  std=  3.1796  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  1.0318  median=  0.0000  std=  2.3583  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  1.6724  median=  0.0000  std=  3.0173  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  6.4493  median=  6.4661  std=  3.2920  p25=  5.1874  p75=  8.9886
+  Reconnaissance  : mean=  2.9244  median=  4.5747  std=  2.9261  p25=  0.0000  p75=  5.8721
+  Generic         : mean=  0.1471  median=  0.0000  std=  1.1290  p25=  0.0000  p75=  0.0000
+
+--- log_spkts ---
+  DoS             : mean=  1.6468  median=  1.0986  std=  1.0564  p25=  1.0986  p75=  2.3979
+  Backdoor        : mean=  1.4750  median=  1.0986  std=  0.7902  p25=  1.0986  p75=  1.0986
+  Analysis        : mean=  1.4830  median=  1.0986  std=  0.6823  p25=  1.0986  p75=  2.3979
+  Normal          : mean=  2.5489  median=  2.3979  std=  1.2032  p25=  1.6094  p75=  3.4340
+  Reconnaissance  : mean=  1.7919  median=  2.3979  std=  0.7012  p25=  1.0986  p75=  2.3979
+  Generic         : mean=  1.1317  median=  1.0986  std=  0.2617  p25=  1.0986  p75=  1.0986
+
+--- log_dpkts ---
+  DoS             : mean=  0.5963  median=  0.0000  std=  1.2448  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.3519  median=  0.0000  std=  0.8202  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.5378  median=  0.0000  std=  0.9742  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  2.3252  median=  2.1972  std=  1.4649  p25=  1.0986  p75=  3.2189
+  Reconnaissance  : mean=  1.0744  median=  1.0986  std=  1.0823  p25=  0.0000  p75=  2.1972
+  Generic         : mean=  0.0525  median=  0.0000  std=  0.4176  p25=  0.0000  p75=  0.0000
+
+--- log_dur ---
+  DoS             : mean=  0.3484  median=  0.0000  std=  0.8567  p25=  0.0000  p75=  0.2431
+  Backdoor        : mean=  0.3019  median=  0.0000  std=  0.8276  p25=  0.0000  p75=  0.0001
+  Analysis        : mean=  0.2718  median=  0.0000  std=  0.6686  p25=  0.0000  p75=  0.4003
+  Normal          : mean=  0.3471  median=  0.0525  std=  0.5691  p25=  0.0017  p75=  0.5599
+  Reconnaissance  : mean=  0.3677  median=  0.1778  std=  0.5283  p25=  0.0000  p75=  0.6156
+  Generic         : mean=  0.0168  median=  0.0000  std=  0.1617  p25=  0.0000  p75=  0.0000
+
+--- log_rate ---
+  DoS             : mean=  9.3217  median= 11.6183  std=  4.2414  p25=  4.2200  p75= 12.2061
+  Backdoor        : mean=  9.5927  median= 11.6183  std=  4.1989  p25=  4.5035  p75= 12.2061
+  Analysis        : mean=  9.4734  median= 11.6183  std=  4.1982  p25=  3.5705  p75= 12.2061
+  Normal          : mean=  5.9997  median=  6.4667  std=  3.1020  p25=  3.3491  p75=  8.0591
+  Reconnaissance  : mean=  7.3102  median=  4.3396  std=  4.5392  p25=  3.0309  p75= 11.7361
+  Generic         : mean= 11.8889  median= 11.7361  std=  1.3386  p25= 11.6183  p75= 12.4292
+
+--- byte_asymmetry ---
+  DoS             : mean=  4.3812  median=  5.3033  std=  2.5118  p25=  5.0689  p75=  5.3033
+  Backdoor        : mean=  4.6608  median=  5.3033  std=  2.2028  p25=  5.3033  p75=  5.3033
+  Analysis        : mean=  4.0554  median=  5.3033  std=  2.4996  p25=  5.1985  p75=  5.3033
+  Normal          : mean=  0.4978  median= -0.0653  std=  2.4790  p25= -0.7035  p75=  1.9587
+  Reconnaissance  : mean=  2.9535  median=  1.6474  std=  2.3726  p25=  0.4647  p75=  5.1299
+  Generic         : mean=  4.6643  median=  4.7449  std=  0.7872  p25=  4.7449  p75=  4.7449
+
+--- pkt_asymmetry ---
+  DoS             : mean=  2.8650  median=  2.0000  std=331.0151  p25=  2.0000  p75=  2.0000
+  Backdoor        : mean=  5.3083  median=  2.0000  std= 17.7863  p25=  2.0000  p75=  2.0000
+  Analysis        : mean=  3.2316  median=  2.0000  std= 11.3696  p25=  2.0000  p75=  2.0000
+  Normal          : mean= -5.4648  median=  0.0000  std= 49.2145  p25= -2.0000  p75=  2.0000
+  Reconnaissance  : mean=  2.0508  median=  2.0000  std= 60.6380  p25=  2.0000  p75=  2.0000
+  Generic         : mean=  1.4168  median=  2.0000  std= 38.1792  p25=  2.0000  p75=  2.0000
+
+--- dttl_gt0 ---
+  DoS             : mean=  0.2230  median=  0.0000  std=  0.4162  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.1657  median=  0.0000  std=  0.3719  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.2353  median=  0.0000  std=  0.4243  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.8602  median=  1.0000  std=  0.3468  p25=  1.0000  p75=  1.0000
+  Reconnaissance  : mean=  0.5017  median=  1.0000  std=  0.5000  p25=  0.0000  p75=  1.0000
+  Generic         : mean=  0.0178  median=  0.0000  std=  0.1322  p25=  0.0000  p75=  0.0000
+
+--- ackdat_gt0 ---
+  DoS             : mean=  0.2031  median=  0.0000  std=  0.4024  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.1383  median=  0.0000  std=  0.3452  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.2323  median=  0.0000  std=  0.4224  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.6916  median=  1.0000  std=  0.4618  p25=  0.0000  p75=  1.0000
+  Reconnaissance  : mean=  0.4968  median=  0.0000  std=  0.5000  p25=  0.0000  p75=  1.0000
+  Generic         : mean=  0.0170  median=  0.0000  std=  0.1293  p25=  0.0000  p75=  0.0000
+
+--- synack_gt0 ---
+  DoS             : mean=  0.2034  median=  0.0000  std=  0.4025  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.1383  median=  0.0000  std=  0.3452  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.2323  median=  0.0000  std=  0.4224  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.6917  median=  1.0000  std=  0.4618  p25=  0.0000  p75=  1.0000
+  Reconnaissance  : mean=  0.4970  median=  0.0000  std=  0.5000  p25=  0.0000  p75=  1.0000
+  Generic         : mean=  0.0170  median=  0.0000  std=  0.1293  p25=  0.0000  p75=  0.0000
+
+--- dbytes_gt0 ---
+  DoS             : mean=  0.2230  median=  0.0000  std=  0.4162  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.1657  median=  0.0000  std=  0.3719  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.2353  median=  0.0000  std=  0.4243  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.8618  median=  1.0000  std=  0.3451  p25=  1.0000  p75=  1.0000
+  Reconnaissance  : mean=  0.5017  median=  1.0000  std=  0.5000  p25=  0.0000  p75=  1.0000
+  Generic         : mean=  0.0178  median=  0.0000  std=  0.1322  p25=  0.0000  p75=  0.0000
+
+--- service_known ---
+  DoS             : mean=  0.1534  median=  0.0000  std=  0.3604  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.0472  median=  0.0000  std=  0.2122  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.2107  median=  0.0000  std=  0.4079  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.3130  median=  0.0000  std=  0.4637  p25=  0.0000  p75=  1.0000
+  Reconnaissance  : mean=  0.1578  median=  0.0000  std=  0.3646  p25=  0.0000  p75=  0.0000
+  Generic         : mean=  0.9845  median=  1.0000  std=  0.1237  p25=  1.0000  p75=  1.0000
+
+--- proto_tcp ---
+  DoS             : mean=  0.2040  median=  0.0000  std=  0.4030  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.1387  median=  0.0000  std=  0.3457  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.2323  median=  0.0000  std=  0.4224  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.7201  median=  1.0000  std=  0.4490  p25=  0.0000  p75=  1.0000
+  Reconnaissance  : mean=  0.4980  median=  0.0000  std=  0.5000  p25=  0.0000  p75=  1.0000
+  Generic         : mean=  0.0171  median=  0.0000  std=  0.1296  p25=  0.0000  p75=  0.0000
+
+--- proto_udp ---
+  DoS             : mean=  0.0322  median=  0.0000  std=  0.1766  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.0146  median=  0.0000  std=  0.1200  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.2368  median=  0.0000  std=  0.4251  p25=  0.0000  p75=  0.0000
+  Reconnaissance  : mean=  0.3496  median=  0.0000  std=  0.4769  p25=  0.0000  p75=  1.0000
+  Generic         : mean=  0.9773  median=  1.0000  std=  0.1491  p25=  1.0000  p75=  1.0000
+
+--- sttl_is_64 ---
+  DoS             : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.0019  median=  0.0000  std=  0.0441  p25=  0.0000  p75=  0.0000
+  Reconnaissance  : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Generic         : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+
+--- sttl_is_128 ---
+  DoS             : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Reconnaissance  : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Generic         : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+
+--- dttl_is_64 ---
+  DoS             : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Reconnaissance  : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Generic         : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+
+--- dttl_is_128 ---
+  DoS             : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Reconnaissance  : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Generic         : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+
+--- real_connection ---
+  DoS             : mean=  0.2031  median=  0.0000  std=  0.4024  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.1383  median=  0.0000  std=  0.3452  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.2323  median=  0.0000  std=  0.4224  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.6916  median=  1.0000  std=  0.4618  p25=  0.0000  p75=  1.0000
+  Reconnaissance  : mean=  0.4968  median=  0.0000  std=  0.5000  p25=  0.0000  p75=  1.0000
+  Generic         : mean=  0.0170  median=  0.0000  std=  0.1293  p25=  0.0000  p75=  0.0000
+
+--- tcp_established ---
+  DoS             : mean=  0.2040  median=  0.0000  std=  0.4030  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.1387  median=  0.0000  std=  0.3457  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.2323  median=  0.0000  std=  0.4224  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.6931  median=  1.0000  std=  0.4612  p25=  0.0000  p75=  1.0000
+  Reconnaissance  : mean=  0.4980  median=  0.0000  std=  0.5000  p25=  0.0000  p75=  1.0000
+  Generic         : mean=  0.0171  median=  0.0000  std=  0.1296  p25=  0.0000  p75=  0.0000
+
+--- state_FIN ---
+  DoS             : mean=  0.1979  median=  0.0000  std=  0.3985  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.1387  median=  0.0000  std=  0.3457  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.2320  median=  0.0000  std=  0.4222  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.6596  median=  1.0000  std=  0.4738  p25=  0.0000  p75=  1.0000
+  Reconnaissance  : mean=  0.4973  median=  0.0000  std=  0.5000  p25=  0.0000  p75=  1.0000
+  Generic         : mean=  0.0170  median=  0.0000  std=  0.1293  p25=  0.0000  p75=  0.0000
+
+--- state_CON ---
+  DoS             : mean=  0.0249  median=  0.0000  std=  0.1558  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.0271  median=  0.0000  std=  0.1623  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.0034  median=  0.0000  std=  0.0579  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.2014  median=  0.0000  std=  0.4011  p25=  0.0000  p75=  0.0000
+  Reconnaissance  : mean=  0.0041  median=  0.0000  std=  0.0643  p25=  0.0000  p75=  0.0000
+  Generic         : mean=  0.0007  median=  0.0000  std=  0.0273  p25=  0.0000  p75=  0.0000
+
+--- state_INT ---
+  DoS             : mean=  0.7607  median=  1.0000  std=  0.4267  p25=  1.0000  p75=  1.0000
+  Backdoor        : mean=  0.8149  median=  1.0000  std=  0.3884  p25=  1.0000  p75=  1.0000
+  Analysis        : mean=  0.7572  median=  1.0000  std=  0.4289  p25=  1.0000  p75=  1.0000
+  Normal          : mean=  0.1097  median=  0.0000  std=  0.3125  p25=  0.0000  p75=  0.0000
+  Reconnaissance  : mean=  0.4935  median=  0.0000  std=  0.5000  p25=  0.0000  p75=  1.0000
+  Generic         : mean=  0.9820  median=  1.0000  std=  0.1331  p25=  1.0000  p75=  1.0000
+
+--- state_RST ---
+  DoS             : mean=  0.0001  median=  0.0000  std=  0.0111  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.0000  median=  0.0000  std=  0.0000  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.0008  median=  0.0000  std=  0.0278  p25=  0.0000  p75=  0.0000
+  Reconnaissance  : mean=  0.0001  median=  0.0000  std=  0.0120  p25=  0.0000  p75=  0.0000
+  Generic         : mean=  0.0000  median=  0.0000  std=  0.0041  p25=  0.0000  p75=  0.0000
+
+--- state_REQ ---
+  DoS             : mean=  0.0164  median=  0.0000  std=  0.1270  p25=  0.0000  p75=  0.0000
+  Backdoor        : mean=  0.0193  median=  0.0000  std=  0.1377  p25=  0.0000  p75=  0.0000
+  Analysis        : mean=  0.0075  median=  0.0000  std=  0.0861  p25=  0.0000  p75=  0.0000
+  Normal          : mean=  0.0283  median=  0.0000  std=  0.1658  p25=  0.0000  p75=  0.0000
+  Reconnaissance  : mean=  0.0048  median=  0.0000  std=  0.0690  p25=  0.0000  p75=  0.0000
+  Generic         : mean=  0.0003  median=  0.0000  std=  0.0160  p25=  0.0000  p75=  0.0000
+
+
+=== CATEGORICAL DISTRIBUTIONS ===
+
+--- state (top values per class) ---
+  DoS             : INT:0.761  FIN:0.198  CON:0.025  REQ:0.016  RST:0.000
+  Backdoor        : INT:0.815  FIN:0.139  CON:0.027  REQ:0.019
+  Analysis        : INT:0.757  FIN:0.232  REQ:0.007  CON:0.003
+  Normal          : FIN:0.660  CON:0.201  INT:0.110  REQ:0.028  RST:0.001
+  Reconnaissance  : FIN:0.497  INT:0.494  REQ:0.005  CON:0.004  RST:0.000
+  Generic         : INT:0.982  FIN:0.017  CON:0.001  REQ:0.000  RST:0.000
+
+--- proto (top values per class) ---
+  DoS             : unas:0.321  tcp:0.204  ospf:0.058  udp:0.032  sctp:0.026
+  Backdoor        : unas:0.346  tcp:0.139  ospf:0.070  sctp:0.030  udp:0.015
+  Analysis        : unas:0.346  tcp:0.232  ospf:0.028  sctp:0.010  any:0.009
+  Normal          : tcp:0.720  udp:0.237  arp:0.041  ospf:0.001  igmp:0.001
+  Reconnaissance  : tcp:0.498  udp:0.350  unas:0.060  ospf:0.016  sctp:0.008
+  Generic         : udp:0.977  tcp:0.017  unas:0.002  ospf:0.001  sctp:0.000
+
+--- service (top values per class) ---
+  DoS             : -:0.847  http:0.105  smtp:0.025  dns:0.009  pop3:0.005
+  Backdoor        : -:0.953  http:0.040  irc:0.005  ftp:0.003
+  Analysis        : -:0.789  http:0.208  smtp:0.002
+  Normal          : -:0.687  dns:0.114  http:0.101  ftp-data:0.038  smtp:0.024
+  Reconnaissance  : -:0.842  http:0.148  snmp:0.006  dns:0.003  smtp:0.001
+  Generic         : dns:0.973  -:0.016  http:0.009  smtp:0.002  ssl:0.000
+
+
+=== FEATURE SEPARABILITY RANKING (DoS vs Backdoor vs Analysis) ===
+Higher score = better at separating the 3 problem classes
+  sttl                           score= 0.2576  ██
+  service_known                  score= 0.2073  ██
+  synack                         score= 0.1541  █
+  proto_udp                      score= 0.1332  █
+  log_sbytes                     score= 0.1322  █
+  ackdat                         score= 0.1143  █
+  log_dbytes                     score= 0.1033  █
+  log_dpkts                      score= 0.1029  █
+  byte_asymmetry                 score= 0.1029  █
+  synack_gt0                     score= 0.1008  █
+  ackdat_gt0                     score= 0.1007  █
+  real_connection                score= 0.1007  █
+  proto_tcp                      score= 0.1004  █
+  tcp_established                score= 0.1004  █
+  state_FIN                      score= 0.0991  
+  dttl                           score= 0.0952  
+  log_spkts                      score= 0.0939  
+  spkts                          score= 0.0932  
+  dpkts                          score= 0.0860  
+  state_CON                      score= 0.0853  
+  dttl_gt0                       score= 0.0750  
+  dbytes_gt0                     score= 0.0750  
+  sbytes                         score= 0.0730  
+  dbytes                         score= 0.0727  
+  state_INT                      score= 0.0637  
+
+
+=== KEY QUESTION: What differs between DoS, Backdoor, Analysis? ===
+  dttl_gt0                 : DoS=  0.223  Backdoor= 0.1657  Analysis= 0.2353  Normal= 0.8602
+  ackdat_gt0               : DoS= 0.2031  Backdoor= 0.1383  Analysis= 0.2323  Normal= 0.6916
+  dbytes_gt0               : DoS=  0.223  Backdoor= 0.1657  Analysis= 0.2353  Normal= 0.8618
+  real_connection          : DoS= 0.2031  Backdoor= 0.1383  Analysis= 0.2323  Normal= 0.6916
+  tcp_established          : DoS=  0.204  Backdoor= 0.1387  Analysis= 0.2323  Normal= 0.6931
+  service_known            : DoS= 0.1534  Backdoor= 0.0472  Analysis= 0.2107  Normal=  0.313
+  state_FIN                : DoS= 0.1979  Backdoor= 0.1387  Analysis=  0.232  Normal= 0.6596
+  state_CON                : DoS= 0.0249  Backdoor= 0.0271  Analysis= 0.0034  Normal= 0.2014
+  sttl_is_64               : DoS=    0.0  Backdoor=    0.0  Analysis=    0.0  Normal= 0.0019
+  dttl_is_64               : DoS=    0.0  Backdoor=    0.0  Analysis=    0.0  Normal=    0.0
+  byte_asymmetry           : DoS= 4.3812  Backdoor= 4.6608  Analysis= 4.0554  Normal= 0.4978
+  log_dur                  : DoS= 0.3484  Backdoor= 0.3019  Analysis= 0.2718  Normal= 0.3471

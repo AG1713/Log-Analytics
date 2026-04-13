@@ -1,9 +1,9 @@
 import asyncio
 import json
-from datetime import datetime
-
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from pymongo.errors import PyMongoError
 
 from database import db
 
@@ -11,6 +11,7 @@ router = APIRouter(prefix="/api", tags=["Network"])
 
 
 def serialize(doc):
+    doc = dict(doc)  # Fix: copy so we don't mutate the original
     doc["_id"] = str(doc["_id"])
     for key, value in doc.items():
         if isinstance(value, datetime):
@@ -20,16 +21,28 @@ def serialize(doc):
 
 @router.get("/devices")
 async def get_devices():
-    """Returns all unique hostnames that have ever sent data."""
-    hostnames = db.alerts.distinct("hostname") + db.network_logs.distinct("hostname")
-    return {"devices": list(set(h for h in hostnames if h))}
+    try:
+        hostnames = (
+            db.alerts.distinct("hostname")
+            + db.network_logs.distinct("hostname")
+            + db.predictions.distinct("hostname")
+        )
+        unique_hostnames = sorted({h for h in hostnames if h and str(h).strip()})
+        return {"devices": unique_hostnames, "count": len(unique_hostnames)}
+    except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=f"MongoDB error: {str(e)}")
 
 
 @router.get("/network/stream")
-async def stream_network_logs(hostname: str = Query(default=None)):
+async def stream_network_logs(request: Request, hostname: str = Query(default=None)):
     async def event_generator():
         last_id = None
+
         while True:
+            # Fix: detect client disconnect and stop the loop
+            if await request.is_disconnected():
+                break
+
             try:
                 query = {}
                 if hostname:
@@ -38,18 +51,16 @@ async def stream_network_logs(hostname: str = Query(default=None)):
                     query["_id"] = {"$gt": last_id}
 
                 logs = list(
-                    db.predictions
-                    .find(query)
-                    .sort("_id", -1)
-                    .limit(20)
+                    db.network_logs.find(query).sort("_id", 1).limit(20)
                 )
 
                 if logs:
-                    last_id = logs[0]["_id"]
+                    last_id = logs[-1]["_id"]
                     payload = [serialize(log) for log in logs]
                     yield f"data: {json.dumps(payload)}\n\n"
 
                 await asyncio.sleep(3)
+
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
                 await asyncio.sleep(5)
@@ -78,15 +89,27 @@ async def receive_logs(request: Request):
     else:
         raise HTTPException(status_code=400, detail="Invalid format")
 
-    for log in logs:
-        log["received_at"] = datetime.utcnow()
-        log["processed"] = False
+    try:
+        for log in logs:
+            log["received_at"] = datetime.now(timezone.utc)
+            log["processed"] = False
 
-    db.network_logs.insert_many(logs)
-    return {"status": "logs stored", "count": len(logs)}
+        result = db.network_logs.insert_many(logs)
+        return {
+            "status": "logs stored",
+            "count": len(result.inserted_ids),
+        }
+
+    except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=f"MongoDB insert failed: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
 
 @router.get("/network/logs")
 def get_logs(limit: int = 50):
-    logs = list(db.predictions.find().sort("_id", -1).limit(limit))
-    return [serialize(log) for log in logs]
+    try:
+        logs = list(db.network_logs.find().sort("_id", -1).limit(limit))
+        return [serialize(log) for log in logs]
+    except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=f"MongoDB error: {str(e)}")

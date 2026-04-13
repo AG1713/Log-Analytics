@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from collections import defaultdict
 import argparse
 
+
 PROTOCOL_MAP = {6: "tcp", 17: "udp", 1: "icmp"}
 DEFAULT_PATHS=[""]
 SERVICE_MAP = {80:"http", 443:"https", 53:"dns", 21:"ftp", 22:"ssh"}
@@ -22,6 +23,7 @@ SIEM_DB_URL = ""
 NETWORK_BACKEND_URL = ""
 CONFIG_URL = ""
 BACKEND_URL=""
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -36,10 +38,12 @@ ip_total_counts    = defaultdict(int)    # src_ip -> total flows initiated
 ip_lock            = threading.Lock()    # thread-safety for the dicts above
 
 
+
 def _prune_window(src_ip, now_ts):
     """Remove connection timestamps outside the sliding window for src_ip."""
     cutoff = now_ts - IP_WINDOW_SECONDS
     ip_conn_times[src_ip] = [t for t in ip_conn_times[src_ip] if t >= cutoff]
+
 
 
 def is_admin():
@@ -47,6 +51,7 @@ def is_admin():
         return ctypes.windll.shell32.IsUserAnAdmin()
     except:
         return False
+
 
 #def installing_docker():
     #url="https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe"
@@ -59,9 +64,11 @@ def is_admin():
             #for chunk in response.iter_content(chunk_size=8192):
                 #file.write(chunk)
 
+
     #print("[+] Installing docker desktop")
     #subprocess.run([installer_path],check=True)
     #print("[+] Docker installation complete")
+
 
 def creating_hostname_collection(hostname,client):
     db = client.siem_db
@@ -70,12 +77,14 @@ def creating_hostname_collection(hostname,client):
     # Use the global AGENT_HOSTNAME you defined in main()
     current_time = datetime.now(timezone.utc)
 
+
     host_data = {
         "hostname": hostname,
         "first_seen": current_time,
         "last_active": current_time,
         "status": "online"
     }
+
 
     try:
         agent_collection.update_one(
@@ -96,6 +105,7 @@ def creating_hostname_collection(hostname,client):
         print(f"Database error: {e}")
     
 
+
 def calculate_sha256(filename):
     sha256_hash = hashlib.sha256()
     try:
@@ -107,8 +117,10 @@ def calculate_sha256(filename):
     except (PermissionError, FileNotFoundError):
         return None
 
+
 def checking(name_to_search: str): # checks whether the required applications
     name_lower = name_to_search.lower()
+
 
     # 1. Map specific names to their unique "heartbeat" files
     # This is much faster and more reliable than the Registry
@@ -119,11 +131,13 @@ def checking(name_to_search: str): # checks whether the required applications
         "python": [os.path.join(os.environ.get("LOCALAPPDATA", ""), r"Programs\Python")]
     }
 
+
     # Check the file paths first if the app is in our dictionary
     if name_lower in app_files:
         for path in app_files[name_lower]:
             if os.path.exists(path):
                 return True
+
 
     # 2. Universal Registry Scan (The "Backup" Plan)
     # We check HKEY_LOCAL_MACHINE (System-wide) and HKEY_CURRENT_USER (Just for you)
@@ -132,6 +146,7 @@ def checking(name_to_search: str): # checks whether the required applications
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW64Node\Microsoft\Windows\CurrentVersion\Uninstall"),
         (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall")
     ]
+
 
     for root, path in registry_locations:
         try:
@@ -153,12 +168,15 @@ def checking(name_to_search: str): # checks whether the required applications
         except FileNotFoundError:
             continue
 
+
     return False
+
 
 def installing_npcap():
     # Direct link to the latest stable installer
     url = "https://npcap.com/dist/npcap-1.80.exe" 
     installer_path = os.path.join(os.environ["TEMP"], "npcap_installer.exe")
+
 
     print("Downloading Npcap installer...")
     response = requests.get(url, stream=True)
@@ -172,11 +190,14 @@ def installing_npcap():
     subprocess.run([installer_path], check=True)
     print("Installation finished.")
 
+
 sessions = {}
+
 
 def process_packet(packet):
     if not packet.haslayer(IP):
         return
+
 
     now = datetime.now(timezone.utc)
     src_ip = packet[IP].src
@@ -188,8 +209,10 @@ def process_packet(packet):
     sport = packet[TCP].sport if packet.haslayer(TCP) else (packet[UDP].sport if packet.haslayer(UDP) else 0)
     dport = packet[TCP].dport if packet.haslayer(TCP) else (packet[UDP].dport if packet.haslayer(UDP) else 0)
 
+
     # 1. Create a unique key for the flow (Direction Neutral)
     flow_key = tuple(sorted([(src_ip, sport), (dst_ip, dport)]))
+
 
     # 2. Initialize new session
     if flow_key not in sessions:
@@ -214,6 +237,7 @@ def process_packet(packet):
             "ports_seen": {dport}
         }
 
+
         # ── NEW: register this new connection in the per-IP window tracker ──
         now_ts = now.timestamp()
         with ip_lock:
@@ -221,6 +245,7 @@ def process_packet(packet):
             ip_conn_times[src_ip].append(now_ts)
             ip_ports_seen[src_ip].add(dport)
             ip_total_counts[src_ip] += 1
+
 
     session = sessions[flow_key]
     is_source = (src_ip == session["src_ip"] and sport == session["src_port"])
@@ -238,6 +263,7 @@ def process_packet(packet):
         session["dpkts"] += 1
         if session["dttl"] == 0: session["dttl"] = packet[IP].ttl
         if session["dtcpb"] == 0 and packet.haslayer(TCP): session["dtcpb"] = packet[TCP].seq
+
 
     # Track TCP Flags
     if packet.haslayer(TCP):
@@ -257,9 +283,11 @@ def process_packet(packet):
             session["ackdat"] = (now - session["synack_time"]).total_seconds()
             session["synack_time"] = None
 
+
     # 6. Termination & Shipping Logic
     duration = (now - session["start_time"]).total_seconds()
     should_ship = False
+
 
     # Check for forced termination
     if packet.haslayer(TCP) and ('F' in packet[TCP].flags or 'R' in packet[TCP].flags):
@@ -270,6 +298,7 @@ def process_packet(packet):
     elif (session["spkts"] + session["dpkts"]) > 50:
         should_ship = True
 
+
     if should_ship:
         # If we didn't see a SYN but we saw traffic in both directions, 
         # it's an established connection we caught mid-stream.
@@ -278,10 +307,12 @@ def process_packet(packet):
         elif session["syn_count"] > 0 and session["dpkts"] == 0:
             session["state"] = "INT" # Interrupted / No response (common in SYN floods)
 
+
         # ── NEW: mark failed flows for failed_connection_ratio ──
         if session["state"] in ("INT", "RST"):
             with ip_lock:
                 ip_failed_counts[session["src_ip"]] += 1
+
 
         # Calculate IAT (Inter-Arrival Times)
         iat_list = [t2 - t1 for t1, t2 in zip(session["timestamps"], session["timestamps"][1:])]
@@ -298,29 +329,37 @@ def process_packet(packet):
         elif session["src_port"] in SERVICE_MAP:
             service = SERVICE_MAP.get(session["src_port"], "-")
 
+
         # ── NEW FEATURES ─────────────────────────────────────────────────────
+
 
         # 1. flow_bytes – total bytes exchanged in this flow (sbytes + dbytes)
         flow_bytes = total_bytes
 
+
         # 2. bytes_per_pkt – average bytes per packet across the whole flow
         bytes_per_pkt = (total_bytes / total_pkts) if total_pkts > 0 else 0
 
+
         # 3. syn_ratio – fraction of packets that carried a SYN flag
-        #    High values (near 1.0) indicate SYN-flood style behaviour
+        #     High values (near 1.0) indicate SYN-flood style behaviour
         syn_ratio = (session["syn_count"] / total_pkts) if total_pkts > 0 else 0
 
+
         # 4. ack_ratio – fraction of packets that carried an ACK flag
-        #    Normal established flows hover around 1.0; very low values are suspicious
+        #     Normal established flows hover around 1.0; very low values are suspicious
         ack_ratio = (session["ack_count"] / total_pkts) if total_pkts > 0 else 0
 
+
         # 5. rst_ratio – fraction of packets that carried a RST flag
-        #    Elevated values suggest port-scanning or aggressive connection teardown
+        #     Elevated values suggest port-scanning or aggressive connection teardown
         rst_ratio = (session["rst_count"] / total_pkts) if total_pkts > 0 else 0
 
+
         # 6. iat_ratio – coefficient of variation of inter-arrival times (std / mean)
-        #    High value → bursty / irregular traffic; low value → steady stream
+        #     High value → bursty / irregular traffic; low value → steady stream
         iat_ratio = (std_iat / mean_iat) if mean_iat > 0 else 0
+
 
         # 7–9  Per-IP window metrics (thread-safe snapshot)
         flow_src_ip = session["src_ip"]
@@ -328,21 +367,26 @@ def process_packet(packet):
         with ip_lock:
             _prune_window(flow_src_ip, now_ts)
 
+
             # 7. unique_ports_per_ip – distinct dst ports this src IP has
-            #    contacted since agent start (port-scan indicator)
+            #     contacted since agent start (port-scan indicator)
             unique_ports_per_ip = len(ip_ports_seen[flow_src_ip])
 
+
             # 8. connections_per_ip_window – how many connections this src IP
-            #    has opened inside the last IP_WINDOW_SECONDS seconds
+            #     has opened inside the last IP_WINDOW_SECONDS seconds
             connections_per_ip_window = len(ip_conn_times[flow_src_ip])
 
+
             # 9. failed_connection_ratio – ratio of failed (INT / RST) flows
-            #    to total flows for this src IP since agent start
+            #     to total flows for this src IP since agent start
             total_for_ip  = ip_total_counts[flow_src_ip]
             failed_for_ip = ip_failed_counts[flow_src_ip]
             failed_connection_ratio = (failed_for_ip / total_for_ip) if total_for_ip > 0 else 0
 
+
         # ─────────────────────────────────────────────────────────────────────
+
 
         final_log = {
             "hostname": session["hostname"],
@@ -385,6 +429,7 @@ def process_packet(packet):
             "processed": False
         }
 
+
         # Filter and Send
         if final_log["dst_port"] not in [27018, 8000] and final_log["src_port"] not in [27018, 8000]:
             try:
@@ -394,9 +439,11 @@ def process_packet(packet):
         
         del sessions[flow_key]
 
+
 def start_network_sniffer(client):
     print("[*] Network Sniffer active. Capturing traffic...")
-    sniff(prn=lambda pkt: process_packet(pkt, logs_col), store=0)
+    sniff(prn=lambda pkt: process_packet(pkt), store=0)
+
 
 def get_latest_watch_paths():
     try:
@@ -407,10 +454,12 @@ def get_latest_watch_paths():
         print(f"[!] Config sync Failed: {e}. Using defaults")
     return DEFAULT_PATHS
 
+
 def run_fim_monitor(client):
     fim_db = client.fim_integrity
     hashes_col = fim_db.file_baselines
     alerts_col = fim_db.fim_alerts
+
 
     print("[*] FIM: Syncing with Backend Configuration...")
     baseline = {}
@@ -434,13 +483,16 @@ def run_fim_monitor(client):
                     )
     print(f"[+] FIM: Initial Baseline established for {len(baseline)} files.")
 
+
     for doc in hashes_col.find({"hostname": AGENT_HOSTNAME}):
         baseline[doc["filepath"]] = doc["hash"]
+
 
     while True:
         time.sleep(CHECK_INTERVAL)
         watch_list = get_latest_watch_paths()
         files_found_on_disk = set()
+
 
         for path in watch_list:
             for root, _, files in os.walk(path):
@@ -449,6 +501,7 @@ def run_fim_monitor(client):
                     files_found_on_disk.add(full_path)
                     current_hash = calculate_sha256(full_path)
                     if not current_hash: continue
+
 
                     if full_path not in baseline:
                         # --- ADDED HOSTNAME HERE ---
@@ -462,6 +515,7 @@ def run_fim_monitor(client):
                         alerts_col.insert_one({**alert, "time": time.ctime(), "hash": current_hash})
                         baseline[full_path] = current_hash
                         hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}}, upsert=True)
+
 
                     elif current_hash != baseline[full_path]:
                         # --- ADDED HOSTNAME HERE ---
@@ -478,6 +532,7 @@ def run_fim_monitor(client):
                         })
                         baseline[full_path] = current_hash
                         hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}})
+
 
         baseline_paths = list(baseline.keys())
         for path in baseline_paths:
@@ -496,6 +551,7 @@ def run_fim_monitor(client):
                     del baseline[path]
                     hashes_col.delete_one({"filepath": path})
 
+
 def send_fim_alert(data):
     try:
         requests.post(BACKEND_URL,json=data,timeout=15)
@@ -503,19 +559,23 @@ def send_fim_alert(data):
         print(f"[!] Failed to ship fim alert: {e}")
     
 
+
 def main():
     global AGENT_HOSTNAME, SIEM_DB_URL, NETWORK_BACKEND_URL, CONFIG_URL, BACKEND_URL
+
 
     parser =argparse.ArgumentParser(
             description = "This is agent.py for windows"
             )
-    parser.add_argument("--siem_db_url",type=str, default="mongodb://localhost:27017/", help="used to provide the siem database url")
+    parser.add_argument("--siem_db_url",type=str, default="mongodb://localhost:27018/", help="used to provide the siem database url")
     parser.add_argument("--network_backend_url",type=str, default="http://172.17.0.1:8000/api/logs", help="used to provide the network alert to backend")
     parser.add_argument("--config_url",type=str, default="http://localhost:8000/api/config",help="used to provide the config url")
     parser.add_argument("--backend_url",type=str, default="http://localhost:8000/api/alerts",help="used to provide backend url")
     parser.add_argument("--agent_hostname",type=str, default="no_nameHostname", help="used to provide agent hostname")
 
+
     arguments=parser.parse_args()
+
 
     SIEM_DB_URL=arguments.siem_db_url
     NETWORK_BACKEND_URL=arguments.network_backend_url
@@ -549,6 +609,7 @@ def main():
         # ALWAYS exit the non-admin process
         sys.exit(0)
 
+
     # --- MAIN LOGIC ---
     print("Checking for Npcap....")
     if not checking("Npcap"):
@@ -559,6 +620,7 @@ def main():
             return
     else:
         print("Npcap found!")
+
 
     client = None
     while True:
@@ -576,6 +638,7 @@ def main():
     
     # --- ELEVATION CHECK ---
 
+
     #print("Checking for Docker....")
     #if not checking("Docker"):
         #try:
@@ -586,15 +649,18 @@ def main():
     #else:
         #print("docker found!")
 
+
     security_modules = [
         (run_fim_monitor, "FIM Integrity Watcher"),
         (start_network_sniffer, "Flow Aggregator (Network)"),
     ]
 
+
     for target_func, name in security_modules:
         thread = threading.Thread(target=target_func, args=(client,), daemon=True)
         thread.start()
         print(f"[+] Started {name} thread.")
+
 
     try:
         while True:
@@ -603,6 +669,7 @@ def main():
         print("\n[!] Shutdown signal received. Closing Agent....")
         client.close()
         sys.exit(0)
+
 
 
 if __name__ == "__main__":

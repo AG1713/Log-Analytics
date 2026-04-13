@@ -1,13 +1,18 @@
 # Use the latest Kali Linux image
 FROM kalilinux/kali-rolling:latest
 
+USER root
+
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 1. Install necessary tools
-# Added 'curl' for downloading wordlists and 'python3-full' for venv support
-RUN apt-get update && apt-get upgrade -y && \
-    apt-get install -y \
+
+# Use the official Kali rolling repository format
+RUN echo "deb http://mirrors.esto.network/kali kali-rolling main contrib non-free non-free-firmware" > /etc/apt/sources.list
+
+# # Install required tools
+RUN apt-get -o Acquire::ForceIPv4=true update && \
+    apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-full \
@@ -18,26 +23,25 @@ RUN apt-get update && apt-get upgrade -y && \
     hydra \
     nmap \
     libcap2-bin \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    dnsutils \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# 2. Set the working directory
+# Set the working directory
 WORKDIR /home/attacker
 
-# 3. Copy the script
-COPY user.txt rockyou.txt attack.py .
+# Copy the script and supporting files
+COPY user.txt rockyou.txt attack.py ./
 
-# 4. Handle Python dependencies (if any)
-# If your script uses 'paramiko', we must install it.
-# We bypass the venv requirement for the 'root' user in a container for simplicity:
-#RUN pip3 install --break-system-packages paramiko
+# Optional Python dependency example
+# RUN pip3 install --break-system-packages paramiko
 
-# 5. Ensure hping3 and nmap have the right capabilities 
-# This allows them to run even if you eventually switch to a non-root user
-RUN setcap 'cap_net_raw,cap_net_admin+eip' $(readlink -f /usr/sbin/hping3) && \
-    setcap 'cap_net_raw,cap_net_admin+eip' $(readlink -f /usr/bin/nmap)
+# Give packet tools capabilities inside the image
+RUN setcap 'cap_net_raw,cap_net_admin+eip' "$(readlink -f /usr/sbin/hping3)" && \
+    setcap 'cap_net_raw,cap_net_admin+eip' "$(readlink -f /usr/bin/nmap)"
 
-# Stay as root to ensure the raw socket tools work without friction
+# Stay as root for raw socket tools
 USER root
 
-#CMD ["python3", "attack.py"]
 CMD ["bash"]

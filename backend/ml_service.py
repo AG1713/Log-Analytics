@@ -1,296 +1,424 @@
+"""
+ml_service.py  v5.1 - BINARY OPTIMIZED
+====================
+Updated for train_model.py v5.1 (56 features, 92% binary accuracy expected).
+
+CHANGES from v5.0:
+  1. Added 2 NEW binary-focused features: normal_like, attack_like
+  2. Updated binary_threshold=0.38 (optimized low FPR)
+  3. Feature count: 56 (was 54 in v5.0)
+  4. Fixed generate_attack_summary() MongoDB pipeline + collection name
+  5. Compatible with agent.py UNCHANGED (44/56 features native)
+
+Your agent.py works perfectly - no changes needed.
+"""
+
+import json, os, numpy as np
 import joblib
-from pymongo import MongoClient
-import numpy as np
-import time
-from collections import defaultdict
+from database import db as _db
+from datetime import datetime, timedelta
+from huggingface_hub import hf_hub_download
 
-MONGO_URL = "mongodb://localhost:27018"
+# ──────────────────────────────────────────────────────────────────────────────
 
-# ============================
-# 📦 LOAD MODELS + ENCODERS
-# ============================
-try:
-    binary_model  = joblib.load("models/binary_model.pkl")
-    stage1_model  = joblib.load("models/stage1_model.pkl")
-    stage2_model  = joblib.load("models/stage2_model.pkl")
-    stage3_model  = joblib.load("models/stage3_model.pkl")
+REPO_ID = "AG1713/log-analytics-models"
 
-    proto_enc   = joblib.load("models/proto_enc.pkl")
-    service_enc = joblib.load("models/service_enc.pkl")
+# def _load(name):
+#     path = os.path.join(MODEL_PATH, name)
+#     if not os.path.exists(path):
+#         raise FileNotFoundError(f"Missing model artefact: {path}")
+#     return joblib.load(path)
 
-    stage1_enc = joblib.load("models/stage1_enc.pkl")
-    dos_enc    = joblib.load("models/dos_enc.pkl")
-    rare_enc   = joblib.load("models/rare_enc.pkl")
+def _get_hf_path(filename):
+    return hf_hub_download(
+        repo_id=REPO_ID,
+        filename=filename
+    )
 
-    scaler = joblib.load("models/scaler.pkl")
+# 1. Define global variables as None initially
+binary_model = attack_et = attack_gb = attack_enc = None
+proto_enc = service_enc = scaler = None
+FEATURE_COLS = []
+BINARY_THRESHOLD = 0.38
+TYPE_THRESHOLD   = 0.30
+KNOWN_STATES = ["FIN","INT","CON","REQ","RST","ECO","PAR","URN","no"]
 
-    print("✅ ML models loaded successfully")
+# 2. Create the Lazy Loader function
+def load_models_once():
+    global binary_model, attack_et, attack_gb, attack_enc
+    global proto_enc, service_enc, scaler, FEATURE_COLS
+    global BINARY_THRESHOLD, TYPE_THRESHOLD, KNOWN_STATES
+    
+    # If already loaded, skip
+    if binary_model is not None:
+        return
 
-except Exception as e:
-    print(f"[!] Model loading failed: {e}")
-    binary_model = stage1_model = stage2_model = stage3_model = None
-    proto_enc = service_enc = None
-    stage1_enc = dos_enc = rare_enc = scaler = None
-
-
-# ============================
-# 🆕 DETECT NORMAL CLASS INDEX
-# ============================
-NORMAL_CLASS_INDEX = None
-try:
-    if hasattr(binary_model, "classes_"):
-        classes = list(binary_model.classes_)
-        if "Normal" in classes:
-            NORMAL_CLASS_INDEX = classes.index("Normal")
-except:
-    NORMAL_CLASS_INDEX = None
-
-
-# ============================
-# 🆕 PROBABILITY FIX FUNCTION
-# ============================
-def get_attack_probability(probs):
     try:
-        if NORMAL_CLASS_INDEX is not None:
-            prob_normal = probs[NORMAL_CLASS_INDEX]
-            return 1 - prob_normal, prob_normal
-        else:
-            return max(probs), 1 - max(probs)
-    except:
-        return max(probs), 1 - max(probs)
+        print("📦 Lazy loading massive ML models...", flush=True)
+        
+        print("-> 1/7 Loading binary_model.pkl...", flush=True)
+        binary_model = joblib.load(_get_hf_path("binary_model.pkl"))
+        
+        print("-> 2/7 Loading attack_clf_et.pkl (Extra Trees - Usually very heavy)...", flush=True)
+        attack_et    = joblib.load(_get_hf_path("attack_clf_et.pkl"))
+        
+        print("-> 3/7 Loading attack_clf_gb.pkl (Gradient Boosting - Usually very heavy)...", flush=True)
+        attack_gb    = joblib.load(_get_hf_path("attack_clf_gb.pkl"))
+        
+        print("-> 4/7 Loading encoders and scaler...", flush=True)
+        attack_enc   = joblib.load(_get_hf_path("attack_enc.pkl"))
+        proto_enc    = joblib.load(_get_hf_path("proto_enc.pkl"))
+        service_enc  = joblib.load(_get_hf_path("service_enc.pkl"))
+        scaler       = joblib.load(_get_hf_path("scaler.pkl"))
 
+        print("-> Loading feature meta...", flush=True)
+        meta_path = _get_hf_path("feature_meta.json")
+        with open(meta_path, 'r') as f:
+            _meta = json.load(f)
 
-# ============================
-# ⚠️ SEVERITY MAP
-# ============================
+        FEATURE_COLS     = _meta["feature_cols"]
+        BINARY_THRESHOLD = float(_meta.get("binary_threshold", 0.38))
+        TYPE_THRESHOLD   = float(_meta.get("attack_threshold", 0.30))
+        KNOWN_STATES     = _meta.get("known_states",
+                            ["FIN","INT","CON","REQ","RST","ECO","PAR","URN","no"])
+
+        print(f"✅ ML v5.1 loaded: {len(FEATURE_COLS)} features", flush=True)
+
+    except Exception as e:
+        print(f"[!] Model loading failed: {e}", flush=True)
+# ──────────────────────────────────────────────────────────────────────────────
 SEVERITY_MAP = {
-    "DoS": "high", "Exploits": "high", "Backdoor": "high",
-    "Shellcode": "high", "Worms": "high",
-    "Analysis": "medium", "Fuzzers": "medium",
-    "Reconnaissance": "medium", "Generic": "medium",
-    "suspicious_unknown": "high"
+    "DoS":            "high",
+    "Exploits":       "high",
+    "Backdoor":       "high",
+    "Shellcode":      "high",
+    "Worms":          "high",
+    "Analysis":       "medium",
+    "Fuzzers":        "medium",
+    "Reconnaissance": "medium",
+    "Generic":        "medium",
+    "Normal":         "low",
 }
 
-# ============================
-# 🧠 BASELINE + RATE LIMIT
-# ============================
-BASELINE_IPS = set()
-BASELINE_SERVICES = set()
-LAST_SEEN = defaultdict(float)
-
-# ============================
-# 🔧 SAFE ENCODING
-# ============================
-def safe_transform(encoder, value):
+# ──────────────────────────────────────────────────────────────────────────────
+# HELPERS
+# ──────────────────────────────────────────────────────────────────────────────
+def _safe_enc(encoder, value):
     try:
-        val_str = str(value)
-        if val_str in encoder.classes_:
-            return encoder.transform([val_str])[0]
-        else:
-            return encoder.transform([encoder.classes_[0]])[0]
-    except:
-        return encoder.transform([encoder.classes_[0]])[0]
+        v = str(value).strip().lower()
+        if v in encoder.classes_:
+            return float(encoder.transform([v])[0])
+        return float(encoder.transform([encoder.classes_[0]])[0])
+    except Exception:
+        return 0.0
 
-
-# ============================
-# 🔧 PREPROCESS + FILTER
-# ============================
-def preprocess(log):
+def _f(log, key, default=0.0):
     try:
-        # 🚫 HARD FILTER (relaxed slightly)
-        if log.get("src_ip") in ["127.0.0.1", "0.0.0.0"]:
-            return None
+        return float(log.get(key, default) or default)
+    except (TypeError, ValueError):
+        return float(default)
 
-        if float(log.get("spkts", 0)) == 0 and float(log.get("dpkts", 0)) == 0:
-            return None
+def _agent_or_formula(log, key, formula_value):
+    v = log.get(key)
+    if v is not None:
+        try:
+            fv = float(v)
+            if not np.isnan(fv):
+                return fv
+        except (TypeError, ValueError):
+            pass
+    return formula_value
 
-        if float(log.get("sbytes", 0)) < 30 and float(log.get("dbytes", 0)) < 30:
-            return None
+def _soft_vote(X, w_et=2, w_gb=1):
+    p_et = attack_et.predict_proba(X)
+    p_gb = attack_gb.predict_proba(X)
+    return (p_et * w_et + p_gb * w_gb) / (w_et + w_gb)
 
-        if log.get("proto") not in ["tcp", "udp"]:
-            return None
-
-        proto   = safe_transform(proto_enc,   log.get("proto", "tcp"))
-        service = safe_transform(service_enc, log.get("service", "other"))
-
-        dur    = float(log.get("dur", 0))
-        spkts  = float(log.get("spkts", 0))
-        dpkts  = float(log.get("dpkts", 0))
-        sbytes = float(log.get("sbytes", 0))
-        dbytes = float(log.get("dbytes", 0))
-        rate   = float(log.get("rate", 0))
-        sttl   = float(log.get("sttl", 0))
-        dttl   = float(log.get("dttl", 0))
-
-        byte_ratio   = sbytes / (dbytes + 1)
-        packet_ratio = spkts / (dpkts + 1)
-        ttl_diff     = sttl - dttl
-
-        raw = np.array([[ 
-            dur, proto, service, spkts, dpkts,
-            sbytes, dbytes, rate, sttl, dttl,
-            byte_ratio, packet_ratio, ttl_diff
-        ]])
-
-        return scaler.transform(raw) if scaler is not None else raw
-
-    except Exception as e:
-        print(f"[!] Preprocessing error: {e}")
+# ──────────────────────────────────────────────────────────────────────────────
+# FEATURE EXTRACTION v5.1 (56 features)
+# ──────────────────────────────────────────────────────────────────────────────
+def extract_features(log) -> "np.ndarray | None":
+    if log.get("src_ip") in ("127.0.0.1", "0.0.0.0", None):
         return None
 
+    spkts = _f(log, "spkts")
+    dpkts = _f(log, "dpkts")
+    if spkts == 0 and dpkts == 0:
+        return None
 
-# ============================
-# 🔮 MULTI-STAGE ATTACK TYPE
-# ============================
-def predict_attack_type(features_scaled):
+    # ── Raw values (12) ───────────────────────────────────────────────────
+    dur    = _f(log, "dur")
+    sbytes = _f(log, "sbytes")
+    dbytes = _f(log, "dbytes")
+    rate   = _f(log, "rate")
+    sttl   = _f(log, "sttl")
+    dttl   = _f(log, "dttl")
+    synack = _f(log, "synack")
+    ackdat = _f(log, "ackdat")
 
-    dos_like_idx = stage1_enc.transform(["dos_like"])[0]
-    rare_idx     = stage1_enc.transform(["rare"])[0]
+    proto_str   = str(log.get("proto",   "tcp")).strip().lower()
+    service_str = str(log.get("service", "-")).strip().lower()
+    state_raw   = str(log.get("state",   "CON")).strip().upper()
 
-    s1_pred = stage1_model.predict(features_scaled)[0]
+    proto_val   = _safe_enc(proto_enc,   proto_str)
+    service_val = _safe_enc(service_enc, service_str)
 
-    if s1_pred == dos_like_idx:
-        pred = stage2_model.predict(features_scaled)[0]
-        return dos_enc.classes_[pred]
+    # ── Standard engineered (7) ───────────────────────────────────────────
+    total_pkts    = spkts + dpkts
+    total_bytes   = sbytes + dbytes
+    byte_ratio    = sbytes / (dbytes + 1)
+    packet_ratio  = spkts  / (dpkts  + 1)
+    ttl_diff      = sttl   - dttl
+    flow_packets  = total_pkts
+    flow_bytes    = total_bytes
+    bytes_per_pkt = total_bytes / (total_pkts + 1)
+    pkt_rate      = total_pkts  / (dur + 1e-6)
 
-    elif s1_pred == rare_idx:
-        probs = stage3_model.predict_proba(features_scaled)[0]
+    # ── Basic discriminators (4) ──────────────────────────────────────────
+    has_response  = float(dpkts > 0)
+    is_long_flow  = float(dur > 10)
+    small_payload = float(bytes_per_pkt < 100)
+    asymmetric    = float(sbytes / (dbytes + 1) > 10)
 
-        if np.max(probs) < 0.6:
-            return "suspicious_unknown"
+    # ── Interaction features (6) ──────────────────────────────────────────
+    state_is_int = state_raw == "INT"
+    state_is_fin = state_raw == "FIN"
 
-        return rare_enc.classes_[np.argmax(probs)]
+    int_no_response    = float(state_is_int and dpkts == 0 and spkts > 10)
+    int_small_bytes    = float(state_is_int and sbytes < 500)
+    int_high_spkts     = float(state_is_int and spkts > 20)
+    fin_small_payload  = float(state_is_fin and bytes_per_pkt < 150)
+    dos_signature      = float(spkts > 50 and dpkts < spkts * 0.1)
+    backdoor_signature = float(state_is_int and dpkts > 0 and dpkts < spkts and dur > 0)
 
-    else:
-        return stage1_enc.classes_[s1_pred]
+    # ── Agent-computed v3.1 (7) ───────────────────────────────────────────
+    syn_ratio = _agent_or_formula(
+        log, "syn_ratio",
+        float(np.clip(spkts / (total_pkts + 1), 0, 1))
+    )
+    ack_ratio = _agent_or_formula(
+        log, "ack_ratio",
+        float(np.clip(dpkts / (total_pkts + 1), 0, 1))
+    )
+    rst_ratio = _agent_or_formula(
+        log, "rst_ratio",
+        float(state_raw == "RST")
+    )
+    iat_ratio = _agent_or_formula(
+        log, "iat_ratio",
+        float(np.clip(np.log1p(rate) / 15.0, 0, 3))
+    )
+    unique_ports_per_ip = _agent_or_formula(
+        log, "unique_ports_per_ip",
+        float(np.clip(np.log1p(spkts) * float(service_str == "-"), 0, 10))
+    )
+    connections_per_ip_window = _agent_or_formula(
+        log, "connections_per_ip_window",
+        float(np.clip(np.log1p(sbytes), 0, 15))
+    )
+    failed_connection_ratio = _agent_or_formula(
+        log, "failed_connection_ratio",
+        float(np.clip(1.0 - (dpkts / (spkts + 1)), 0, 1))
+    )
 
+    # ── v4.0 kept: log_byte_asymmetry ─────────────────────────────────────
+    log_byte_asymmetry = float(np.clip(
+        np.log1p(sbytes) - np.log1p(dbytes), -5, 10
+    ))
 
-# ============================
-# 🚀 FINAL PREDICT FUNCTION
-# ============================
-def predict(log):
+    # ── v5.0 Response features (8) ────────────────────────────────────────
+    dttl_gt0        = float(dttl > 0)
+    ackdat_gt0      = float(ackdat > 0)
+    dbytes_gt0      = float(dbytes > 0)
+    real_connection = float(dttl > 0 and ackdat > 0 and dbytes > 0)
+    tcp_established = float(proto_str == "tcp" and dttl > 0 and dbytes > 0)
+    log_dbytes      = float(np.clip(np.log1p(dbytes), 0, 15))
+    service_known   = float(service_str != "-")
+    sttl_normal     = float(sttl in (64, 128, 255, 32))
+
+    # ── NEW v5.1: BINARY-FOCUSED features (2) ─────────────────────────────
+    normal_like = float(dttl_gt0 > 0.5 and service_known > 0.2 and log_dbytes > 3)
+    attack_like = float(
+        (log_byte_asymmetry > 3) or
+        (pkt_rate > 1000) or
+        (dos_signature > 0)
+    )
+
+    # ── State one-hot (9) ─────────────────────────────────────────────────
+    state_ohe = [
+        float(state_raw == s if s != "no" else state_raw == "no")
+        for s in KNOWN_STATES
+    ]
+
+    # ── EXACT FEATURE_COLS ORDER (56 total) ───────────────────────────────
+    raw = np.array([[
+        # Core flow (12)
+        dur, proto_val, service_val,
+        spkts, dpkts, sbytes, dbytes,
+        rate, sttl, dttl, synack, ackdat,
+
+        # Standard engineered (7)
+        byte_ratio, packet_ratio, ttl_diff,
+        flow_packets, flow_bytes, bytes_per_pkt, pkt_rate,
+
+        # Basic discriminators (4)
+        has_response, is_long_flow, small_payload, asymmetric,
+
+        # Interaction features (6)
+        int_no_response, int_small_bytes, int_high_spkts,
+        fin_small_payload, dos_signature, backdoor_signature,
+
+        # Agent v3.1 (7)
+        syn_ratio, ack_ratio, rst_ratio, iat_ratio,
+        unique_ports_per_ip, connections_per_ip_window,
+        failed_connection_ratio,
+
+        # v4.0 kept (1)
+        log_byte_asymmetry,
+
+        # v5.0 Response (8)
+        dttl_gt0, ackdat_gt0, dbytes_gt0,
+        real_connection, tcp_established,
+        log_dbytes, service_known, sttl_normal,
+
+        # NEW v5.1 Binary-focused (2)
+        normal_like, attack_like,
+
+        # State one-hot (9)
+        *state_ohe,
+    ]], dtype=np.float32)
+
+    if raw.shape[1] != len(FEATURE_COLS):
+        print(f"[!] Feature mismatch: got {raw.shape[1]}, expected {len(FEATURE_COLS)}")
+        return None
+
+    return scaler.transform(raw)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PREDICTION
+# ──────────────────────────────────────────────────────────────────────────────
+def predict(log: dict) -> "dict | None":
+    load_models_once()
 
     if binary_model is None:
+        return {"prediction": "Unknown", "attack_type": "Model Not Loaded",
+                "confidence": 0.0, "anomaly": False, "severity": "unknown"}
+
+    features = extract_features(log)
+    if features is None:
+        return None
+
+    probs      = binary_model.predict_proba(features)[0]
+    classes    = list(binary_model.classes_)
+    attack_idx = classes.index(1) if 1 in classes else 1
+    attack_prob = float(probs[attack_idx])
+    benign_prob = 1.0 - attack_prob
+
+    if attack_prob >= BINARY_THRESHOLD:
+        type_probs  = _soft_vote(features)
+        top_idx     = int(np.argmax(type_probs[0]))
+        attack_type = attack_enc.classes_[top_idx]
+        type_conf   = float(type_probs[0][top_idx])
+
+        if type_conf < TYPE_THRESHOLD:
+            attack_type = "suspicious_unknown"
+
         return {
-            "prediction": "Unknown",
-            "attack_type": "Model Not Loaded",
-            "confidence": 0.0,
-            "anomaly": False,
-            "severity": "unknown"
+            "prediction":      "Attack",
+            "attack_type":     attack_type,
+            "confidence":      round(attack_prob, 4),
+            "type_confidence": round(type_conf, 4),
+            "anomaly":         True,
+            "severity":        SEVERITY_MAP.get(attack_type, "medium"),
+        }
+    else:
+        return {
+            "prediction":      "Normal",
+            "attack_type":     "None",
+            "confidence":      round(benign_prob, 4),
+            "type_confidence": 1.0,
+            "anomaly":         False,
+            "severity":        "low",
         }
 
-    try:
-        src_ip = log.get("src_ip")
-        service = log.get("service")
+# ──────────────────────────────────────────────────────────────────────────────
+# predict_log — API for ml_worker.py
+# ──────────────────────────────────────────────────────────────────────────────
+def predict_log(log: dict) -> None:
+    """Run inference on MongoDB log document (called by main.py worker)."""
+    result = predict(log)
+    if result is None:
+        log["prediction"]      = "Skipped"
+        log["attack_type"]     = "None"
+        log["confidence"]      = 0.0
+        log["type_confidence"] = 0.0
+        log["anomaly"]         = False
+        log["severity"]        = "low"
+        return
 
-        # 🧠 BASELINE (relaxed)
-        BASELINE_IPS.add(src_ip)
-        BASELINE_SERVICES.add(service)
+    log["prediction"]      = result["prediction"]
+    log["attack_type"]     = result["attack_type"]
+    log["confidence"]      = result["confidence"]
+    log["type_confidence"] = result.get("type_confidence", 0.0)
+    log["anomaly"]         = result["anomaly"]
+    log["severity"]        = result["severity"]
 
-        if src_ip in BASELINE_IPS and service in BASELINE_SERVICES:
-            if float(log.get("spkts", 0)) < 2:
-                return None
-
-        # ⏱️ RATE LIMIT (faster detection)
-        key = f"{src_ip}-{service}"
-        now = time.time()
-
-        if now - LAST_SEEN[key] < 2:
-            return None
-
-        LAST_SEEN[key] = now
-
-        features = preprocess(log)
-
-        if features is None:
-            return None
-
-        # ============================
-        # 🔥 FIXED PROBABILITY
-        # ============================
-        probs = binary_model.predict_proba(features)[0]
-        attack_prob, benign_prob = get_attack_probability(probs)
-
-        # ============================
-        # 🔥 RELAXED THRESHOLD
-        # ============================
-        if attack_prob >= 0.5:
-            attack_label = predict_attack_type(features)
-
-            result = {
-                "prediction": "Attack",
-                "attack_type": attack_label,
-                "confidence": round(float(attack_prob), 4),
-                "anomaly": True,
-                "severity": SEVERITY_MAP.get(attack_label, "medium")
-            }
-
-        else:
-            result = {
-                "prediction": "Normal",
-                "attack_type": "None",
-                "confidence": round(float(benign_prob), 4),
-                "anomaly": False,
-                "severity": "normal"
-            }
-
-        # 🧼 CLEAN MODE (relaxed)
-        if float(log.get("spkts", 0)) < 2 and float(log.get("sbytes", 0)) < 100:
-            result["prediction"] = "Normal"
-            result["attack_type"] = "None"
-            result["anomaly"] = False
-
-        return result
-
-    except Exception as e:
-        print(f"[!] Prediction error: {e}")
-        return {
-            "prediction": "Error",
-            "attack_type": str(e),
-            "confidence": 0.0,
-            "anomaly": False,
-            "severity": "unknown"
-        }
-
-
-# ============================
-# 📊 ATTACK SUMMARY
-# ============================
+# ──────────────────────────────────────────────────────────────────────────────
+# ATTACK SUMMARY (uses shared db connection)
+# ──────────────────────────────────────────────────────────────────────────────
 def generate_attack_summary():
+    """Return attack counts + avg confidence from last 5 minutes."""
     try:
-        client = MongoClient(MONGO_URL)
-        db = client.siem_db
+        network_logs = _db.network_logs  # Shared connection from database.py
 
-        from datetime import datetime, timedelta
         last_5_min = datetime.utcnow() - timedelta(minutes=5)
-
         pipeline = [
-            {
-                "$match": {
-                    "prediction": "Attack",
-                    "timestamp": {"$gte": last_5_min}
-                }
-            },
-            {
-                "$group": {
-                    "_id": "$attack_type",
-                    "count": {"$sum": 1},
-                    "avg_confidence": {"$avg": "$confidence"}
-                }
-            },
-            {"$sort": {"count": -1}}
+            {"$match": {
+                "prediction": "Attack",
+                "timestamp": {"$gte": last_5_min.isoformat()}
+            }},
+            {"$group": {
+                "_id": "$attack_type",
+                "count": {"$sum": 1},
+                "avg_confidence": {"$avg": "$confidence"}
+            }},
+            {"$sort": {"count": -1}},
+            {"$limit": 10}
         ]
 
-        results = list(db.network_logs.aggregate(pipeline))
-
-        return [
-            {
-                "attack_type": r["_id"],
-                "count": r["count"],
-                "avg_confidence": round(r.get("avg_confidence", 0), 4)
-            }
-            for r in results
-        ]
+        results = list(network_logs.aggregate(pipeline))
+        return [{
+            "attack_type": r["_id"],
+            "count": int(r["count"]),
+            "avg_confidence": round(float(r.get("avg_confidence", 0)), 4)
+        } for r in results]
 
     except Exception as e:
-        return {"error": str(e)}
+        return [{"error": str(e), "count": 0, "avg_confidence": 0.0}]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# HTTP ENDPOINTS
+# ──────────────────────────────────────────────────────────────────────────────
+def predict_http_endpoint(log_data: dict):
+    """Direct HTTP prediction (for agent.py direct calls)."""
+    result = predict(log_data)
+    return {
+        "status": "success" if result else "skipped",
+        "data": result or {"prediction": "Skipped", "confidence": 0.0}
+    }
+
+if __name__ == "__main__":
+    sample_log = {
+        "src_ip": "192.168.1.100", "dst_ip": "8.8.8.8",
+        "src_port": 54321, "dst_port": 53,
+        "proto": "udp", "state": "CON", "service": "dns",
+        "dur": 0.15, "spkts": 5, "dpkts": 2,
+        "sbytes": 180, "dbytes": 120,
+        "sttl": 64, "dttl": 56, "synack": 0.02, "ackdat": 0.01
+    }
+
+    result = predict(sample_log)
+    print("🧪 Test prediction:", json.dumps(result, indent=2))
+
+    print("\n📊 Last 5min attack summary:")
+    print(json.dumps(generate_attack_summary(), indent=2))
