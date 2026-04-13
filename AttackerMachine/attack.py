@@ -2,6 +2,7 @@ import subprocess
 from boofuzz import *
 import os
 import time
+import multiprocessing
 
 
 class Attack():
@@ -55,49 +56,68 @@ class Attack():
         except Exception as e:
             print(f"Error running Nmap: {e}")
 
+    def _fuzz_worker(self, session, request_name):
+        """Helper to run the blocking fuzz loop in a child process."""
+        try:
+            session.connect(s_get(request_name))
+            session.fuzz()
+        except Exception as e:
+            print(f"[-] Fuzzer Process Error: {e}")
+
     def boofuzzNetwork(self):
-        print(f"[+] Initializing Boofuzz stateful fuzzer against {self.targetIP}:{self.targetPort}...")
+        print(f"[+] Initializing Boofuzz against {self.targetIP}:{self.targetPort}...")
         
+        # 1. Setup the Session
         session = Session(
             target=Target(
                 connection=TCPSocketConnection(self.targetIP, int(self.targetPort))
             ),
         )
 
+        request_name = ""
+
+        # 2. Define protocol-specific requests
         if str(self.targetPort) == "22":
-            s_initialize("ssh_fuzz_request")
+            request_name = "ssh_fuzz"
+            s_initialize(request_name)
             if s_block("ssh_header"):
                 s_static("SSH-2.0-")
-                s_string("OpenSSH_8.2p1", name="version_string")
+                s_string("OpenSSH_8.2p1", name="version")
                 s_static("\r\n")
-                if s_block("payload_body"):
-                    s_group("methods", ["AUTH", "LOGIN", "SHELL"])
-                    s_delim(" ")
-                    s_string("admin", name="user_fuzz")
-                    s_static("\r\n")
-            s_block_end() # Close payload_body
-            s_block_end() # Close ssh_header
-            session.connect(s_get("ssh_fuzz_request"))
+            s_block_end() # Closes ssh_header
 
         elif str(self.targetPort) == "21":
-            s_initialize("ftp_login_fuzz")
+            request_name = "ftp_fuzz"
+            s_initialize(request_name)
             if s_block("ftp_commands"):
-                s_group("verbs", ["USER", "PASS", "CWD", "STOR", "RETR", "DELE"])
+                s_group("verbs", ["USER", "PASS", "CWD", "DELE"])
                 s_delim(" ")
-                s_string("anonymous", name="ftp_arg")
+                s_string("anonymous", name="arg")
                 s_static("\r\n")
-            s_block_end()
-            session.connect(s_get("ftp_login_fuzz"))
-        
-        else:
-            print(f"[-] No specific fuzzer for port {self.targetPort}. Defaulting to generic TCP.")
-            s_initialize("generic_tcp")
-            s_string("FUZZ_DATA")
-            s_block_end()
-            session.connect(s_get("generic_tcp"))
+            s_block_end() # Closes ftp_commands
 
-        print(f"[!] Fuzzing started. Access the dashboard at http://127.0.0.1:26000")
-        session.fuzz()
+        else:
+            print(f"[!] No specific protocol for port {self.targetPort}, using generic TCP.")
+            request_name = "generic_tcp"
+            s_initialize(request_name)
+            s_string("FUZZ_DATA")
+            # No block used here, so no s_block_end needed
+
+        # 3. Handle Execution with 10-second timer
+        if request_name:
+            fuzz_proc = multiprocessing.Process(
+                target=self._fuzz_worker, 
+                args=(session, request_name)
+            )
+            
+            print(f"[!] Starting fuzzer for 10 seconds. Dashboard: http://localhost:26000")
+            fuzz_proc.start()
+            
+            time.sleep(10)
+            
+            fuzz_proc.terminate()
+            fuzz_proc.join()
+            print(f"[+] Fuzzing stopped after 10 seconds.")
 
 def main():
     while True:
