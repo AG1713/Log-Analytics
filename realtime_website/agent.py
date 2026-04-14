@@ -260,6 +260,13 @@ def process_packet(packet):
         # ─────────────────────────────────────────────────────────────────────
 
 
+       # ── VETERAN FIX: SIGNIFICANCE CHECK ──
+        # We determine if this flow is actually worth ML analysis.
+        # If it's just a 1-2 packet heartbeat over a long duration, it's "Noise".
+        is_significant = True
+        if total_pkts < 4 and duration > 5:
+            is_significant = False
+
         final_log = {
             "hostname": session["hostname"],
             "timestamp": now.isoformat(),
@@ -274,40 +281,40 @@ def process_packet(packet):
             "sttl": session["sttl"], "dttl": session["dttl"],
             "synack": session["synack"], "ackdat": session["ackdat"],
             "stcpb": session["stcpb"], "dtcpb": session["dtcpb"],
-            # Original Engineered Features
-            "rate": (total_bytes / duration) if duration > 0 else 0,
-            "pkt_rate": (total_pkts / duration) if duration > 0 else 0,
-            "byte_rate": (total_bytes / duration) if duration > 0 else 0,
-            "flow_ratio": session["spkts"] / (session["dpkts"] + 1),
+            "rate": (total_bytes / duration) if duration > 0.1 else 0,
+            "pkt_rate": (total_pkts / duration) if duration > 0.1 else 0,
+            "byte_rate": (total_bytes / duration) if duration > 0.1 else 0,
+            "flow_ratio": float(session["spkts"] / (session["dpkts"] + 1)),
             "syn_count": session["syn_count"],
             "ack_count": session["ack_count"],
             "fin_count": session["fin_count"],
             "rst_count": session["rst_count"],
-            "mean_iat": mean_iat,
-            "std_iat": std_iat,
-            "flow_packets": total_pkts,
+            "mean_iat": float(mean_iat),
+            "std_iat": float(std_iat),
+            "flow_packets": int(total_pkts),
             "port_count": len(session["ports_seen"]),
-            # ── NEW Features ──────────────────────────────────────────────────
-            "flow_bytes": flow_bytes,                                # total bytes in flow
-            "bytes_per_pkt": bytes_per_pkt,                          # avg bytes / packet
-            "syn_ratio": syn_ratio,                                  # SYN pkts / total pkts
-            "ack_ratio": ack_ratio,                                  # ACK pkts / total pkts
-            "rst_ratio": rst_ratio,                                  # RST pkts / total pkts
-            "iat_ratio": iat_ratio,                                  # std_iat / mean_iat (CoV)
-            "unique_ports_per_ip": unique_ports_per_ip,              # distinct dst ports (src IP)
-            "connections_per_ip_window": connections_per_ip_window,  # conns in sliding window
-            "failed_connection_ratio": failed_connection_ratio,      # failed / total (src IP)
-            # ─────────────────────────────────────────────────────────────────
-            "processed": False
+            "flow_bytes": int(flow_bytes),
+            "bytes_per_pkt": float(bytes_per_pkt),
+            "syn_ratio": float(syn_ratio),
+            "ack_ratio": float(ack_ratio),
+            "rst_ratio": float(rst_ratio),
+            "iat_ratio": float(iat_ratio),
+            "unique_ports_per_ip": int(unique_ports_per_ip),
+            "connections_per_ip_window": int(connections_per_ip_window),
+            "failed_connection_ratio": float(failed_connection_ratio),
+            "processed": False,
+            "is_significant": is_significant  # <--- NEW FIELD
         }
 
         # Filter and Send
+        # Add a check to ignore very low-level noise if desired, 
+        # or just pass is_significant to the ML model.
         if final_log["dst_port"] not in [27018, 8000] and final_log["src_port"] not in [27018, 8000]:
             try:
                 requests.post(NETWORK_BACKEND_URL, json=final_log, timeout=10)
             except Exception as e:
                 print(f"[!] Shipping failed: {e}")
-        
+ 
         del sessions[flow_key]
 
 def start_network_sniffer(client):
