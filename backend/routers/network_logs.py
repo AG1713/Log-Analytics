@@ -12,18 +12,16 @@ router = APIRouter(prefix="/api", tags=["Network"])
 
 
 def serialize(doc):
-    # 1. Handle empty documents gracefully
+    # Handle empty documents gracefully
     if not doc:
         return doc
         
-    # 2. Safely cast to dictionary
     try:
         doc = dict(doc) 
     except Exception as e:
         print(f"🚨 Serialization Error: Could not convert document to dict. Error: {e}", flush=True)
         return None # Or raise the exception depending on how your API handles errors
 
-    # 3. Iterate and convert
     for key, value in list(doc.items()): # Using list() ensures safe iteration if dictionary changes size
         try:
             if isinstance(value, ObjectId):
@@ -33,7 +31,6 @@ def serialize(doc):
             # Optional: Catch other weird types here in the future if needed
             
         except Exception as e:
-            # THIS is the magic line that prevents cluelessness.
             # It tells you exactly WHICH field broke and WHAT type it is.
             print(f"🚨 Serialization Error on field '{key}' (Type: {type(value)}): {e}", flush=True)
             
