@@ -12,6 +12,7 @@ from scapy.all import sniff, IP, TCP, UDP, ICMP
 from datetime import datetime, timezone
 from collections import defaultdict
 import argparse
+import statistics
 
 
 PROTOCOL_MAP = {6: "tcp", 17: "udp", 1: "icmp"}
