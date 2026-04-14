@@ -56,6 +56,7 @@ def predict_log(log):
         severity = result.get("severity", SEVERITY_MAP.get(attack_type, "low"))
 
         record = {
+            "raw_log_id": log.get("_id"),
             "timestamp": datetime.utcnow(),
             "hostname": log.get("hostname"),
             "prediction": prediction,
@@ -86,13 +87,7 @@ def predict_log(log):
                 {"_id": log["_id"]},
                 {
                     "$set": {
-                        "prediction": prediction,
-                        "attack": prediction,
-                        "attack_type": attack_type,
-                        "confidence": round(confidence, 4),
-                        "type_confidence": round(type_confidence, 4),
-                        "anomaly": anomaly,
-                        "severity": severity,
+                        # ONLY update the state flags
                         "processed": True,
                         "processed_at": datetime.utcnow(),
                     }
