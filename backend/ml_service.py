@@ -4,11 +4,12 @@ ml_service.py  v5.1 - BINARY OPTIMIZED
 Updated for train_model.py v5.1 (56 features, 92% binary accuracy expected).
 
 CHANGES from v5.0:
-  1. Added 2 NEW binary-focused features: normal_like, attack_like
-  2. Updated binary_threshold=0.38 (optimized low FPR)
-  3. Feature count: 56 (was 54 in v5.0)
-  4. Fixed generate_attack_summary() MongoDB pipeline + collection name
-  5. Compatible with agent.py UNCHANGED (44/56 features native)
+ 1. Added 2 NEW binary-focused features: normal_like, attack_like
+ 2. Updated binary_threshold=0.38 (optimized low FPR)
+ 3. Feature count: 56 (was 54 in v5.0)
+ 4. Fixed generate_attack_summary() MongoDB pipeline + collection name
+ 5. Compatible with agent.py UNCHANGED (44/56 features native)
+ 6. NEW: Noise filter + Internal IP protection (172.17.x.x → threshold 0.80)
 
 Your agent.py works perfectly - no changes needed.
 """
@@ -20,14 +21,7 @@ from datetime import datetime, timedelta
 from huggingface_hub import hf_hub_download
 
 # ──────────────────────────────────────────────────────────────────────────────
-
 REPO_ID = "AG1713/log-analytics-models"
-
-# def _load(name):
-#     path = os.path.join(MODEL_PATH, name)
-#     if not os.path.exists(path):
-#         raise FileNotFoundError(f"Missing model artefact: {path}")
-#     return joblib.load(path)
 
 def _get_hf_path(filename):
     return hf_hub_download(
@@ -80,12 +74,13 @@ def load_models_once():
         BINARY_THRESHOLD = float(_meta.get("binary_threshold", 0.38))
         TYPE_THRESHOLD   = float(_meta.get("attack_threshold", 0.30))
         KNOWN_STATES     = _meta.get("known_states",
-                            ["FIN","INT","CON","REQ","RST","ECO","PAR","URN","no"])
+                        ["FIN","INT","CON","REQ","RST","ECO","PAR","URN","no"])
 
         print(f"✅ ML v5.1 loaded: {len(FEATURE_COLS)} features", flush=True)
 
     except Exception as e:
         print(f"[!] Model loading failed: {e}", flush=True)
+
 # ──────────────────────────────────────────────────────────────────────────────
 SEVERITY_MAP = {
     "DoS":            "high",
@@ -295,7 +290,7 @@ def extract_features(log) -> "np.ndarray | None":
     return scaler.transform(raw)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# PREDICTION
+# PREDICTION (WITH NEW NOISE FILTER + IP PROTECTION)
 # ──────────────────────────────────────────────────────────────────────────────
 def predict(log: dict) -> "dict | None":
     load_models_once()
@@ -303,6 +298,18 @@ def predict(log: dict) -> "dict | None":
     if binary_model is None:
         return {"prediction": "Unknown", "attack_type": "Model Not Loaded",
                 "confidence": 0.0, "anomaly": False, "severity": "unknown"}
+
+    # --- NEW: SURGICAL NOISE FILTER ---
+    is_sig = log.get("is_significant", True)
+    spkts = _f(log, "spkts")
+    dpkts = _f(log, "dpkts")
+    
+    # Auto-label idle noise as Normal
+    if not is_sig or (spkts + dpkts < 5):
+        return {
+            "prediction": "Normal", "attack_type": "None", "confidence": 1.0,
+            "type_confidence": 1.0, "anomaly": False, "severity": "low"
+        }
 
     features = extract_features(log)
     if features is None:
@@ -314,7 +321,13 @@ def predict(log: dict) -> "dict | None":
     attack_prob = float(probs[attack_idx])
     benign_prob = 1.0 - attack_prob
 
-    if attack_prob >= BINARY_THRESHOLD:
+    # --- NEW: INTERNAL IP PROTECTION ---
+    src_ip = str(log.get("src_ip", ""))
+    effective_threshold = BINARY_THRESHOLD
+    if src_ip.startswith("172.17."):
+        effective_threshold = 0.80  # Real hping3 floods will hit >0.95
+
+    if attack_prob >= effective_threshold:
         type_probs  = _soft_vote(features)
         top_idx     = int(np.argmax(type_probs[0]))
         attack_type = attack_enc.classes_[top_idx]
