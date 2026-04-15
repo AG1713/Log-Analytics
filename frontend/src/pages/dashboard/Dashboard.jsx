@@ -2,9 +2,8 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import {
-  PieChart, Pie, Cell, Tooltip, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, ResponsiveContainer,
-  LineChart, Line, Legend,
+  PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, BarChart, Bar
 } from "recharts";
 
 // --- Constants ---
@@ -65,7 +64,7 @@ const Card = ({ children, style = {} }) => (
 );
 
 const CardLabel = ({ children }) => (
-  <div style={{ fontSize: "10px", color: COLORS.muted, letterSpacing: "0.07em", marginBottom: "12px" }}>
+  <div style={{ fontSize: "10px", color: COLORS.muted, letterSpacing: "0.07em", marginBottom: "12px", textTransform: "uppercase" }}>
     {children}
   </div>
 );
@@ -124,18 +123,32 @@ export default function Dashboard() {
   const [networkLogs, setNetworkLogs]         = useState([]);
   const [selectedDevice, setSelectedDevice]   = useState(null);
 
-  // Summary cards + charts — refresh every 30s
-  const { data, isLoading, isError, error } = useQuery({
+  // Core metrics (updated to include IPs, DoS, Port Scans)
+  const { data: summary, isLoading, isError, error } = useQuery({
     queryKey:      ["attackSummary"],
     queryFn:       api.fetchAttackSummary,
     refetchInterval: 30000,
   });
 
-  // Attack timeline for the line chart — refresh every 30s
-  const { data: timelineData = [] } = useQuery({
-    queryKey:      ["attackTimeline"],
-    queryFn:       () => api.fetchAttackTimeline(6),
+  // New: Traffic Volume Timeline
+  const { data: trafficData = [] } = useQuery({
+    queryKey:      ["trafficTimeline"],
+    queryFn:       () => api.fetchTrafficTimeline(6),
     refetchInterval: 30000,
+  });
+
+  // New: Top 5 Recent Attacks
+  const { data: recentAttacks = [] } = useQuery({
+    queryKey:      ["recentAttacks"],
+    queryFn:       () => api.fetchRecentAttacks(5),
+    refetchInterval: 15000,
+  });
+
+  // New: Top 5 Recent FIM Alerts
+  const { data: recentFim = [] } = useQuery({
+    queryKey:      ["recentFim"],
+    queryFn:       () => api.fetchRecentFim(5),
+    refetchInterval: 15000,
   });
 
   const { data: devicesData } = useQuery({
@@ -149,11 +162,10 @@ export default function Dashboard() {
   const { data: initialLogs = [] } = useQuery({
     queryKey: ["networkLogs"],
     queryFn:  () => api.fetchNetworkLogs(50),
-    enabled:  showNetworkLogs,    // only fetch when table is open
+    enabled:  showNetworkLogs,
     staleTime: 0,
   });
 
-  // Seed table with initial logs when they arrive
   useEffect(() => {
     if (initialLogs.length > 0 && networkLogs.length === 0) {
       setNetworkLogs(initialLogs);
@@ -168,27 +180,26 @@ export default function Dashboard() {
     }
 
     setNetworkLogs([]);
-
     const es = api.streamNetwork(selectedDevice);
 
     es.onmessage = (e) => {
-    try {
-      const incoming = JSON.parse(e.data);
-      if (!Array.isArray(incoming) || incoming.error) return;
-      setNetworkLogs(prev => {
-        const existingIds = new Set(prev.map(l => l._id));
-        const newOnly = incoming.filter(l => !existingIds.has(l._id));
-        return [...newOnly, ...prev].slice(0, 100);
-      });
-    } catch {}
-  };
+      try {
+        const incoming = JSON.parse(e.data);
+        if (!Array.isArray(incoming) || incoming.error) return;
+        setNetworkLogs(prev => {
+          const existingIds = new Set(prev.map(l => l._id));
+          const newOnly = incoming.filter(l => !existingIds.has(l._id));
+          return [...newOnly, ...prev].slice(0, 100);
+        });
+      } catch {}
+    };
     es.onerror = () => es.close();
     return () => es.close();
   }, [showNetworkLogs, selectedDevice]);
 
-  if (isLoading || !data) return (
+  if (isLoading || !summary) return (
     <div style={{ background: COLORS.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontFamily: "monospace", fontSize: "13px" }}>
-      LOADING...
+      LOADING DASHBOARD...
     </div>
   );
 
@@ -198,28 +209,22 @@ export default function Dashboard() {
     </div>
   );
 
-  // Transform API data for charts
-  const attackDistData = Object.entries(data.attack_distribution).map(([name, value]) => ({
-    name, value, color: ATTACK_COLORS[name] || COLORS.muted,
-  }));
+  // Data for Donut Chart
+  const trafficSplitData = [
+    { name: "Normal", value: summary.total_normal, color: COLORS.green },
+    { name: "Suspicious", value: summary.total_attacks, color: COLORS.red }
+  ];
 
-  const severityData = Object.entries(data.severity_distribution)
-    .filter(([k]) => k !== "normal")
-    .map(([name, value]) => ({ name, value, color: SEVERITY_COLORS[name] }));
-
-  const protocolData = Object.entries(data.protocol_distribution).map(([name, value]) => ({
+  const protocolData = Object.entries(summary.protocol_distribution).map(([name, value]) => ({
     name: name.toUpperCase(), value,
   }));
-
-  const serviceData = Object.entries(data.service_distribution).map(([name, value]) => ({
+  
+  const serviceData = Object.entries(summary.service_distribution).map(([name, value]) => ({
     name: name.toUpperCase(), value,
   }));
-
-  const attackRate    = ((data.total_attacks / data.total_records) * 100).toFixed(1);
-  const criticalCount = data.severity_distribution?.critical || 0;
 
   return (
-    <div style={{ background: COLORS.bg, color: COLORS.text, padding: "24px 28px", flex: 1 }}>
+    <div style={{ background: COLORS.bg, color: COLORS.text, padding: "24px 28px", flex: 1, height: "100vh", overflowY: "auto" }}>
 
       {/* Header */}
       <div className="flex justify-between items-start mb-6">
@@ -228,59 +233,65 @@ export default function Dashboard() {
             Security Dashboard
           </h1>
           <p style={{ fontSize: "10px", color: COLORS.muted, margin: 0, fontFamily: "monospace", letterSpacing: "0.06em" }}>
-            LIVE · {new Date().toUTCString()}
+            SYSTEM HEALTH & TRIAGE · {new Date().toUTCString()}
           </p>
         </div>
-        <button style={{ padding: "5px 14px", borderRadius: "6px", border: `1px solid ${COLORS.cyan}33`, background: `${COLORS.cyan}11`, fontSize: "12px", color: COLORS.cyan, cursor: "pointer" }}>
-          Export
-        </button>
       </div>
 
-      {/* Stat Cards */}
+      {/* ROW 1: Targeted Stat Cards */}
       <div className="grid grid-cols-4 gap-3 mb-4">
-        <StatCard label="TOTAL RECORDS"   value={data.total_records}  accent={COLORS.blue}   sub="From live dataset" />
-        <StatCard label="TOTAL ATTACKS"   value={data.total_attacks}  accent={COLORS.red}    sub={`${attackRate}% of total traffic`} alert />
-        <StatCard label="CRITICAL EVENTS" value={criticalCount}       accent={COLORS.orange} sub="Worms, Backdoors, Shellcode" alert />
-        <StatCard label="NORMAL TRAFFIC"  value={data.total_normal}   accent={COLORS.green}  sub={`${(100 - parseFloat(attackRate)).toFixed(1)}% of total`} />
+        <StatCard label="TOTAL NETWORK TRAFFIC" value={summary.total_records} accent={COLORS.blue} sub="Row count in raw logs" />
+        <StatCard label="UNIQUE SOURCE IPs" value={summary.unique_ips || 0} accent={COLORS.purple} sub="Distinct external hosts" />
+        <StatCard label="DoS SPIKES DETECTED" value={summary.dos_count || 0} accent={COLORS.red} sub="Identified by ML model" alert={summary.dos_count > 0} />
+        <StatCard label="ACTIVE PORT SCANS" value={summary.port_scan_count || 0} accent={COLORS.orange} sub="Reconnaissance attempts" alert={summary.port_scan_count > 0} />
       </div>
 
-      {/* Severity Cards */}
-      <div className="grid grid-cols-4 gap-3 mb-4">
-        {["critical", "high", "medium", "low"].map(sev => (
-          <div key={sev} style={{ background: `${SEVERITY_COLORS[sev]}0d`, border: `1px solid ${SEVERITY_COLORS[sev]}30`, borderRadius: "9px", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: "11px", color: SEVERITY_COLORS[sev], textTransform: "uppercase", letterSpacing: "0.06em" }}>{sev}</span>
-            <span style={{ fontSize: "20px", fontWeight: 700, fontFamily: "monospace", color: SEVERITY_COLORS[sev] }}>
-              {(data.severity_distribution?.[sev] || 0).toLocaleString()}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {/* Charts Row 1 */}
+      {/* ROW 2: High-Level Charts */}
       <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
-        <Card>
-          <CardLabel>ATTACK DISTRIBUTION</CardLabel>
+        {/* Normal vs Suspicious Donut */}
+        {/* <Card>
+          <CardLabel>TRAFFIC CLASSIFICATION</CardLabel>
           <ResponsiveContainer width="100%" height={180} debounce={300}>
             <PieChart>
-              <Pie data={attackDistData} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={2} dataKey="value">
-                {attackDistData.map((e, i) => <Cell key={i} fill={e.color} stroke="transparent" />)}
+              <Pie data={trafficSplitData} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={2} dataKey="value">
+                {trafficSplitData.map((e, i) => <Cell key={i} fill={e.color} stroke="transparent" />)}
               </Pie>
               <Tooltip {...tooltipStyle} cursor={false} />
             </PieChart>
           </ResponsiveContainer>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5px", marginTop: "8px" }}>
-            {attackDistData.map(item => (
-              <div key={item.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px" }}>
-                <span style={{ display: "flex", alignItems: "center", gap: "4px", color: "#4a6a8a" }}>
-                  <span style={{ width: "6px", height: "6px", borderRadius: "2px", background: item.color, display: "inline-block", flexShrink: 0 }} />
+          <div style={{ display: "flex", justifyContent: "space-around", marginTop: "8px" }}>
+            {trafficSplitData.map(item => (
+              <div key={item.name} style={{ textAlign: "center" }}>
+                <div style={{ fontSize: "10px", color: COLORS.muted, display: "flex", alignItems: "center", gap: "4px" }}>
+                  <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: item.color }} />
                   {item.name}
-                </span>
-                <span style={{ fontFamily: "monospace", color: COLORS.text }}>{item.value.toLocaleString()}</span>
+                </div>
+                <div style={{ fontSize: "14px", fontWeight: "bold", fontFamily: "monospace" }}>{item.value.toLocaleString()}</div>
               </div>
             ))}
           </div>
-        </Card>
+        </Card> */}
 
+        {/* Traffic Volume vs Time */}
+        <Card>
+          <CardLabel>TRAFFIC VOLUME VS TIME (LAST 6H)</CardLabel>
+          <ResponsiveContainer width="100%" height={210} debounce={300}>
+            {trafficData.length > 0 ? (
+              <LineChart data={trafficData}>
+                <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
+                <XAxis dataKey="time" tick={{ fontSize: 9, fill: COLORS.muted }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
+                <Tooltip {...tooltipStyle} />
+                <Line type="monotone" dataKey="traffic" stroke={COLORS.cyan} dot={false} strokeWidth={2} name="Volume" />
+              </LineChart>
+            ) : (
+              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontSize: "11px" }}>
+                Aggregating network data...
+              </div>
+            )}
+          </ResponsiveContainer>
+        </Card>
+        
         <Card style={{ display: "flex", flexDirection: "column" }}>
           <CardLabel>LOGS BY PROTOCOL</CardLabel>
           <div style={{ flex: 1, minHeight: 0 }}>
@@ -310,51 +321,71 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
         </Card>
+
       </div>
 
-      {/* Charts Row 2 */}
-      <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: "1fr 2fr" }}>
-
-        {/* ✅ REPLACED: Connection State → Attack Timeline */}
-        <Card>
-          <CardLabel>ATTACK TIMELINE · LAST 6H</CardLabel>
-          <ResponsiveContainer width="100%" height={160} debounce={300}>
-            {timelineData.length > 0 ? (
-              <LineChart data={timelineData}>
-                <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-                <XAxis dataKey="time" tick={{ fontSize: 9, fill: COLORS.muted }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-                <Tooltip {...tooltipStyle} />
-                <Legend wrapperStyle={{ fontSize: "10px", color: COLORS.muted }} />
-                <Line type="monotone" dataKey="attacks" stroke={COLORS.red}   dot={false} strokeWidth={1.5} name="Attacks" />
-                <Line type="monotone" dataKey="normal"  stroke={COLORS.green} dot={false} strokeWidth={1.5} name="Normal"  />
-              </LineChart>
-            ) : (
-              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontSize: "11px" }}>
-                Collecting data...
+      {/* ROW 3: Quick Triage Alerts */}
+      <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        {/* Attack Alerts List */}
+        <Card style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${COLORS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <CardLabel style={{ margin: 0 }}>RECENT ATTACK ALERTS</CardLabel>
+            <button 
+              onClick={() => window.location.href = '/analysis'} 
+              style={{ fontSize: "10px", color: COLORS.cyan, background: "transparent", border: "none", cursor: "pointer" }}
+            >
+              View Analysis &rarr;
+            </button>
+          </div>
+          <div>
+            {recentAttacks.length === 0 ? (
+              <div style={{ padding: "20px", textAlign: "center", color: COLORS.muted, fontSize: "11px" }}>No recent attacks detected.</div>
+            ) : recentAttacks.map((alert, i) => (
+              <div key={i} style={{ padding: "10px 16px", borderBottom: i < 4 ? `1px solid ${COLORS.border}` : "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: "12px", color: COLORS.text, marginBottom: "2px" }}>{alert.src_ip} &rarr; {alert.dst_ip}</div>
+                  <div style={{ fontSize: "10px", color: COLORS.muted, fontFamily: "monospace" }}>{alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : "—"}</div>
+                </div>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <SeverityBadge severity={alert.severity} />
+                  <AttackBadge attack={alert.attack} />
+                </div>
               </div>
-            )}
-          </ResponsiveContainer>
+            ))}
+          </div>
         </Card>
 
-        <Card>
-          <CardLabel>SEVERITY BREAKDOWN</CardLabel>
-          <ResponsiveContainer width="100%" height={160} debounce={300}>
-            <BarChart data={severityData} barSize={36}>
-              <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-              <XAxis dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-              <Tooltip {...tooltipStyle} />
-              <Bar dataKey="value" name="Count" radius={[3, 3, 0, 0]} opacity={0.85}>
-                {severityData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+        {/* FIM Alerts List */}
+        <Card style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${COLORS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <CardLabel style={{ margin: 0 }}>RECENT FIM ALERTS</CardLabel>
+            <button 
+              onClick={() => window.location.href = '/fim'} 
+              style={{ fontSize: "10px", color: COLORS.cyan, background: "transparent", border: "none", cursor: "pointer" }}
+            >
+              View FIM Dashboard &rarr;
+            </button>
+          </div>
+          <div>
+            {recentFim.length === 0 ? (
+              <div style={{ padding: "20px", textAlign: "center", color: COLORS.muted, fontSize: "11px" }}>No recent file integrity alerts.</div>
+            ) : recentFim.map((alert, i) => (
+              <div key={i} style={{ padding: "10px 16px", borderBottom: i < 4 ? `1px solid ${COLORS.border}` : "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "70%" }}>
+                  <div style={{ fontSize: "12px", color: COLORS.text, marginBottom: "2px", overflow: "hidden", textOverflow: "ellipsis" }}>{alert.file}</div>
+                  <div style={{ fontSize: "10px", color: COLORS.muted, fontFamily: "monospace" }}>{alert.hostname} • {alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : "—"}</div>
+                </div>
+                <span style={{ fontSize: "10px", padding: "2px 6px", background: `${COLORS.amber}20`, color: COLORS.amber, borderRadius: "3px", border: `1px solid ${COLORS.amber}40` }}>
+                  {alert.type || "MODIFIED"}
+                </span>
+              </div>
+            ))}
+          </div>
         </Card>
       </div>
 
-      {/* Network Logs Toggle Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", marginTop: "4px" }}>
+      {/* ROW 4: Network Logs Toggle & Table (Unchanged logic, just UI fit) */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", marginTop: "16px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
           <button
             onClick={() => setShowNetworkLogs(v => !v)}
@@ -410,7 +441,6 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Network Logs Table — updated columns for predictions schema */}
       {showNetworkLogs && (
         <Card>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
@@ -433,7 +463,6 @@ export default function Dashboard() {
                   key={log._id || i}
                   style={{
                     borderBottom: `1px solid #080f1a`,
-                    // highlight attack rows subtly
                     background: log.attack && log.attack !== "BENIGN" && log.attack !== "Normal"
                       ? `${COLORS.red}08`
                       : "transparent",
@@ -478,7 +507,6 @@ export default function Dashboard() {
           </table>
         </Card>
       )}
-
     </div>
   );
 }

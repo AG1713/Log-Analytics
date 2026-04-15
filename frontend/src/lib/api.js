@@ -7,8 +7,13 @@ const del  = (url, body) => fetch(`${BASE}${url}`, { method: "DELETE", headers: 
 export const api = {
   // ML / Dashboard
   fetchAttackSummary:  () => get("/api/attack-summary"),   // ← fixed: was /attack_summary (old CSV endpoint)
+  fetchTrafficTimeline: (hours = 6) => get(`/api/traffic-timeline?hours=${hours}`), // ← NEW
   fetchAttackTimeline: (hours = 6) => get(`/api/attack-timeline?hours=${hours}`),  // ← new
   fetchNetworkLogs:    (limit = 50) => get(`/api/network/logs?limit=${limit}`),     // ← new (initial table load)
+
+  // Quick Triage
+  fetchRecentAttacks:  (limit = 5) => get(`/api/recent-attacks?limit=${limit}`),    // ← NEW
+  fetchRecentFim:      (limit = 5) => get(`/api/recent-fim?limit=${limit}`),        // ← NEW
 
   // Devices
   fetchDevices:        () => get("/api/devices"),

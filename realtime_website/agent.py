@@ -15,6 +15,7 @@ import argparse
 
 
 
+
 # --- CONFIGURATION ---
 DEFAULT_PATHS = ["/etc/nginx", "/var/www/html"] 
 CHECK_INTERVAL = 10 
@@ -24,17 +25,20 @@ AGENT_HOSTNAME = ""
 SIEM_DB_URL = ""
 NETWORK_BACKEND_URL = ""
 CONFIG_URL = ""
+BACKEND_URL = ""
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # NEW FEATURE: Per-IP tracking windows (for connections_per_ip_window,
 #              unique_ports_per_ip, failed_connection_ratio)
 # ─────────────────────────────────────────────────────────────────────────────
 IP_WINDOW_SECONDS = 60          # sliding window width (seconds)
-ip_conn_times      = defaultdict(list)   # src_ip -> [timestamps of connections]
-ip_ports_seen      = defaultdict(set)    # src_ip -> {dst_ports contacted}
-ip_failed_counts   = defaultdict(int)    # src_ip -> count of failed (INT/RST) flows
-ip_total_counts    = defaultdict(int)    # src_ip -> total flows initiated
-ip_lock            = threading.Lock()    # thread-safety for the dicts above
+ip_conn_times = defaultdict(list)   # src_ip -> [timestamps of connections]
+ip_ports_seen = defaultdict(set)    # src_ip -> {dst_ports contacted}
+ip_failed_counts = defaultdict(int)    # src_ip -> count of failed (INT/RST) flows
+ip_total_counts = defaultdict(int)    # src_ip -> total flows initiated
+ip_lock = threading.Lock()    # thread-safety for the dicts above
+
 
 def _prune_window(src_ip, now_ts):
     """Remove connection timestamps outside the sliding window for src_ip."""
@@ -42,11 +46,12 @@ def _prune_window(src_ip, now_ts):
     ip_conn_times[src_ip] = [t for t in ip_conn_times[src_ip] if t >= cutoff]
 
 
+
 def check_permissions():
     # Check if we are root
     if os.geteuid() == 0:
         return True
-    
+
     # If not root, check if we have the specific capability to sniff
     # (This handles your Docker 'setcap' scenario)
     try:
@@ -57,10 +62,12 @@ def check_permissions():
     except Exception:
         return False
 
+
 def calculate_sha256(filepath):
     sha256_hash = hashlib.sha256()
     try:
-        if not os.path.isfile(filepath): return None
+        if not os.path.isfile(filepath):
+            return None
         with open(filepath, "rb") as f:
             for byte_block in iter(lambda: f.read(4096), b""):
                 sha256_hash.update(byte_block)
@@ -68,12 +75,11 @@ def calculate_sha256(filepath):
     except (PermissionError, FileNotFoundError):
         return None
 
+
 def creating_hostname_collection(hostname, client):
     db = client.siem_db
-    # We call the collection 'agents' or 'host_registry'
-    agents_col = db.agents 
-    
-    # Metadata to store about the host
+    agents_col = db.agents
+
     host_data = {
         "hostname": hostname,
         "first_seen": datetime.now(timezone.utc),
@@ -82,12 +88,9 @@ def creating_hostname_collection(hostname, client):
     }
 
     try:
-        # 'upsert=True' is the key here: 
-        # It updates 'last_active' if host exists, 
-        # or inserts the whole 'host_data' if it's new.
         agents_col.update_one(
             {"hostname": hostname},
-            {"$set": {"last_active": datetime.now(timezone.utc)}, 
+            {"$set": {"last_active": datetime.now(timezone.utc)},
              "$setOnInsert": {"first_seen": datetime.now(timezone.utc)}},
             upsert=True
         )
@@ -99,6 +102,7 @@ def creating_hostname_collection(hostname, client):
 # Global dictionary to track active flows
 sessions = {}
 
+
 def process_packet(packet):
     if not packet.haslayer(IP):
         return
@@ -108,15 +112,12 @@ def process_packet(packet):
     dst_ip = packet[IP].dst
     proto_num = packet[IP].proto
     proto_str = PROTO_MAP.get(proto_num, "other")
-    
-    # Identify ports
+
     sport = packet[TCP].sport if packet.haslayer(TCP) else (packet[UDP].sport if packet.haslayer(UDP) else 0)
     dport = packet[TCP].dport if packet.haslayer(TCP) else (packet[UDP].dport if packet.haslayer(UDP) else 0)
 
-    # 1. Create a unique key for the flow (Direction Neutral)
     flow_key = tuple(sorted([(src_ip, sport), (dst_ip, dport)]))
 
-    # 2. Initialize new session
     if flow_key not in sessions:
         sessions[flow_key] = {
             "hostname": AGENT_HOSTNAME,
@@ -133,38 +134,46 @@ def process_packet(packet):
             "synack_time": None,
             "synack": 0, "ackdat": 0,
             "state": "REQ",
-            # New Tracking Fields
             "timestamps": [now.timestamp()],
             "syn_count": 0, "ack_count": 0, "fin_count": 0, "rst_count": 0,
             "ports_seen": {dport}
         }
 
+        with ip_lock:
+            ip_conn_times[src_ip].append(now.timestamp())
+            ip_ports_seen[src_ip].add(dport)
+            ip_total_counts[src_ip] += 1
+
     session = sessions[flow_key]
     is_source = (src_ip == session["src_ip"] and sport == session["src_port"])
     pkt_len = len(packet)
-    
-    # Update core counters
+
     session["timestamps"].append(now.timestamp())
     session["last_packet_time"] = now
-    
+    session["ports_seen"].add(dport)
+
     if is_source:
         session["sbytes"] += pkt_len
         session["spkts"] += 1
     else:
         session["dbytes"] += pkt_len
         session["dpkts"] += 1
-        if session["dttl"] == 0: session["dttl"] = packet[IP].ttl
-        if session["dtcpb"] == 0 and packet.haslayer(TCP): session["dtcpb"] = packet[TCP].seq
+        if session["dttl"] == 0:
+            session["dttl"] = packet[IP].ttl
+        if session["dtcpb"] == 0 and packet.haslayer(TCP):
+            session["dtcpb"] = packet[TCP].seq
 
-    # Track TCP Flags
     if packet.haslayer(TCP):
         flags = packet[TCP].flags
-        if 'S' in flags: session["syn_count"] += 1
-        if 'A' in flags: session["ack_count"] += 1
-        if 'F' in flags: session["fin_count"] += 1
-        if 'R' in flags: session["rst_count"] += 1
-        
-        # Handshake Logic
+        if 'S' in flags:
+            session["syn_count"] += 1
+        if 'A' in flags:
+            session["ack_count"] += 1
+        if 'F' in flags:
+            session["fin_count"] += 1
+        if 'R' in flags:
+            session["rst_count"] += 1
+
         if not is_source and 'S' in flags and 'A' in flags:
             if session["syn_time"]:
                 session["synack"] = (now - session["syn_time"]).total_seconds()
@@ -174,97 +183,64 @@ def process_packet(packet):
             session["ackdat"] = (now - session["synack_time"]).total_seconds()
             session["synack_time"] = None
 
-    # 6. Termination & Shipping Logic
     duration = (now - session["start_time"]).total_seconds()
     should_ship = False
 
-    # Check for forced termination
     if packet.haslayer(TCP) and ('F' in packet[TCP].flags or 'R' in packet[TCP].flags):
         session["state"] = "FIN" if 'F' in packet[TCP].flags else "RST"
         should_ship = True
-    elif duration >= 10: # Keep duration at 10 seconds as requested
+    elif duration >= 10:
         should_ship = True
     elif (session["spkts"] + session["dpkts"]) > 50:
         should_ship = True
 
     if should_ship:
-        # If we didn't see a SYN but we saw traffic in both directions, 
-        # it's an established connection we caught mid-stream.
         if session["syn_count"] == 0 and (session["spkts"] > 0 and session["dpkts"] > 0):
-            session["state"] = "CON" 
+            session["state"] = "CON"
         elif session["syn_count"] > 0 and session["dpkts"] == 0:
-            session["state"] = "INT" # Interrupted / No response (common in SYN floods)
+            session["state"] = "INT"
 
         if session["state"] in ("INT", "RST"):
             with ip_lock:
-                ip_failed_counts[session["src_ip"]] +=1
-        # Calculate IAT (Inter-Arrival Times)
+                ip_failed_counts[session["src_ip"]] += 1
+
         iat_list = [t2 - t1 for t1, t2 in zip(session["timestamps"], session["timestamps"][1:])]
         mean_iat = statistics.mean(iat_list) if iat_list else 0
         std_iat = statistics.stdev(iat_list) if len(iat_list) > 1 else 0
-        
+
         total_pkts = session["spkts"] + session["dpkts"]
         total_bytes = session["sbytes"] + session["dbytes"]
-        
-        # Determine Service (Simple mapping by destination port)
+
         service = "-"
         if session["dst_port"] in SERVICE_MAP:
             service = SERVICE_MAP.get(session["dst_port"], "-")
         elif session["src_port"] in SERVICE_MAP:
             service = SERVICE_MAP.get(session["src_port"], "-")
 
-        # ── NEW FEATURES ─────────────────────────────────────────────────────
-
-        # 1. flow_bytes – total bytes exchanged in this flow (sbytes + dbytes)
         flow_bytes = total_bytes
-
-        # 2. bytes_per_pkt – average bytes per packet across the whole flow
         bytes_per_pkt = (total_bytes / total_pkts) if total_pkts > 0 else 0
-
-        # 3. syn_ratio – fraction of packets that carried a SYN flag
-        #    High values (near 1.0) indicate SYN-flood style behaviour
         syn_ratio = (session["syn_count"] / total_pkts) if total_pkts > 0 else 0
-
-        # 4. ack_ratio – fraction of packets that carried an ACK flag
-        #    Normal established flows hover around 1.0; very low values are suspicious
         ack_ratio = (session["ack_count"] / total_pkts) if total_pkts > 0 else 0
-
-        # 5. rst_ratio – fraction of packets that carried a RST flag
-        #    Elevated values suggest port-scanning or aggressive connection teardown
         rst_ratio = (session["rst_count"] / total_pkts) if total_pkts > 0 else 0
-
-        # 6. iat_ratio – coefficient of variation of inter-arrival times (std / mean)
-        #    High value → bursty / irregular traffic; low value → steady stream
         iat_ratio = (std_iat / mean_iat) if mean_iat > 0 else 0
 
-        # 7–9  Per-IP window metrics (thread-safe snapshot)
         flow_src_ip = session["src_ip"]
         now_ts = now.timestamp()
         with ip_lock:
             _prune_window(flow_src_ip, now_ts)
-
-            # 7. unique_ports_per_ip – distinct dst ports this src IP has
-            #    contacted since agent start (port-scan indicator)
             unique_ports_per_ip = len(ip_ports_seen[flow_src_ip])
-
-            # 8. connections_per_ip_window – how many connections this src IP
-            #    has opened inside the last IP_WINDOW_SECONDS seconds
             connections_per_ip_window = len(ip_conn_times[flow_src_ip])
-
-            # 9. failed_connection_ratio – ratio of failed (INT / RST) flows
-            #    to total flows for this src IP since agent start
-            total_for_ip  = ip_total_counts[flow_src_ip]
+            total_for_ip = ip_total_counts[flow_src_ip]
             failed_for_ip = ip_failed_counts[flow_src_ip]
             failed_connection_ratio = (failed_for_ip / total_for_ip) if total_for_ip > 0 else 0
 
-        # ─────────────────────────────────────────────────────────────────────
+        # Ensure duration is at least 0.001 to prevent zero-rate issues
+        eff_dur = duration if duration > 0.001 else 0.001
 
-
-       # ── VETERAN FIX: SIGNIFICANCE CHECK ──
-        # We determine if this flow is actually worth ML analysis.
-        # If it's just a 1-2 packet heartbeat over a long duration, it's "Noise".
+        # VETERAN FIX: Port scans are fast (low duration) but high impact
+        # We mark it significant if it's very fast OR has many packets
         is_significant = True
-        if total_pkts < 4 and duration > 5:
+        if total_pkts < 3 and duration > 5:
             is_significant = False
 
         final_log = {
@@ -281,47 +257,44 @@ def process_packet(packet):
             "sttl": session["sttl"], "dttl": session["dttl"],
             "synack": session["synack"], "ackdat": session["ackdat"],
             "stcpb": session["stcpb"], "dtcpb": session["dtcpb"],
-            "rate": (total_bytes / duration) if duration > 0.1 else 0,
-            "pkt_rate": (total_pkts / duration) if duration > 0.1 else 0,
-            "byte_rate": (total_bytes / duration) if duration > 0.1 else 0,
-            "flow_ratio": float(session["spkts"] / (session["dpkts"] + 1)),
+            "rate": (total_bytes / eff_dur),
+            "pkt_rate": (total_pkts / eff_dur),
+            "byte_rate": (total_bytes / eff_dur),
+            "is_significant": is_significant,
+            "flow_ratio": session["spkts"] / (session["dpkts"] + 1),
             "syn_count": session["syn_count"],
             "ack_count": session["ack_count"],
             "fin_count": session["fin_count"],
             "rst_count": session["rst_count"],
-            "mean_iat": float(mean_iat),
-            "std_iat": float(std_iat),
-            "flow_packets": int(total_pkts),
+            "mean_iat": mean_iat,
+            "std_iat": std_iat,
+            "flow_packets": total_pkts,
             "port_count": len(session["ports_seen"]),
-            "flow_bytes": int(flow_bytes),
-            "bytes_per_pkt": float(bytes_per_pkt),
-            "syn_ratio": float(syn_ratio),
-            "ack_ratio": float(ack_ratio),
-            "rst_ratio": float(rst_ratio),
-            "iat_ratio": float(iat_ratio),
-            "unique_ports_per_ip": int(unique_ports_per_ip),
-            "connections_per_ip_window": int(connections_per_ip_window),
-            "failed_connection_ratio": float(failed_connection_ratio),
-            "processed": False,
-            "is_significant": is_significant  # <--- NEW FIELD
+            "flow_bytes": flow_bytes,
+            "bytes_per_pkt": bytes_per_pkt,
+            "syn_ratio": syn_ratio,
+            "ack_ratio": ack_ratio,
+            "rst_ratio": rst_ratio,
+            "iat_ratio": iat_ratio,
+            "unique_ports_per_ip": unique_ports_per_ip,
+            "connections_per_ip_window": connections_per_ip_window,
+            "failed_connection_ratio": failed_connection_ratio,
+            "processed": False
         }
 
-        # Filter and Send
-        # Add a check to ignore very low-level noise if desired, 
-        # or just pass is_significant to the ML model.
         if final_log["dst_port"] not in [27018, 8000] and final_log["src_port"] not in [27018, 8000]:
             try:
                 requests.post(NETWORK_BACKEND_URL, json=final_log, timeout=10)
             except Exception as e:
                 print(f"[!] Shipping failed: {e}")
- 
+
         del sessions[flow_key]
 
+
 def start_network_sniffer(client):
-    #db = client.siem_db
-    #logs_col = db.network_logs
     print("[*] Network Sniffer active. Capturing traffic...")
     sniff(prn=lambda pkt: process_packet(pkt), store=0)
+
 
 def get_latest_watch_paths():
     try:
@@ -332,15 +305,15 @@ def get_latest_watch_paths():
         print(f"[!] Config Sync Failed: {e}. Using defaults.")
     return DEFAULT_PATHS
 
+
 def run_fim_monitor(client):
     fim_db = client.fim_integrity
     hashes_col = fim_db.file_baselines
-    #alerts_col = fim_db.fim_alerts
 
     print("[*] FIM: Syncing with Backend Configuration...")
     baseline = {}
     watch_list = get_latest_watch_paths()
-    
+
     for path in watch_list:
         for root, _, files in os.walk(path):
             for file in files:
@@ -351,8 +324,8 @@ def run_fim_monitor(client):
                     hashes_col.update_one(
                         {"filepath": full_path},
                         {"$set": {
-                            "hostname": AGENT_HOSTNAME, # Track which host owns this baseline
-                            "hash": file_hash, 
+                            "hostname": AGENT_HOSTNAME,
+                            "hash": file_hash,
                             "last_check": time.time()
                         }},
                         upsert=True
@@ -373,34 +346,28 @@ def run_fim_monitor(client):
                     full_path = os.path.join(root, file)
                     files_found_on_disk.add(full_path)
                     current_hash = calculate_sha256(full_path)
-                    if not current_hash: continue
+                    if not current_hash:
+                        continue
 
                     if full_path not in baseline:
-                        # --- ADDED HOSTNAME HERE ---
                         alert = {
-                            "hostname": AGENT_HOSTNAME, 
-                            "type": "FIM_NEW_FILE", 
-                            "file": full_path, 
+                            "hostname": AGENT_HOSTNAME,
+                            "type": "FIM_NEW_FILE",
+                            "file": full_path,
                             "severity": "medium"
                         }
                         send_fim_alert(alert)
-                        #alerts_col.insert_one({**alert, "time": time.ctime(), "hash": current_hash})
                         baseline[full_path] = current_hash
                         hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}}, upsert=True)
 
                     elif current_hash != baseline[full_path]:
-                        # --- ADDED HOSTNAME HERE ---
                         alert = {
-                            "hostname": AGENT_HOSTNAME, 
-                            "type": "FIM_MODIFICATION", 
-                            "file": full_path, 
+                            "hostname": AGENT_HOSTNAME,
+                            "type": "FIM_MODIFICATION",
+                            "file": full_path,
                             "severity": "high"
                         }
                         send_fim_alert(alert)
-                        #alerts_col.insert_one({
-                            #**alert, "time": time.ctime(), 
-                            #"old_hash": baseline[full_path], "new_hash": current_hash
-                        #})
                         baseline[full_path] = current_hash
                         hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}})
 
@@ -408,18 +375,17 @@ def run_fim_monitor(client):
         for path in baseline_paths:
             if path not in files_found_on_disk:
                 if any(path.startswith(watched) for watched in watch_list):
-                    # --- ADDED HOSTNAME HERE ---
                     alert = {
-                        "hostname": AGENT_HOSTNAME, 
-                        "type": "FIM_DELETION", 
-                        "file": path, 
+                        "hostname": AGENT_HOSTNAME,
+                        "type": "FIM_DELETION",
+                        "file": path,
                         "severity": "critical"
                     }
                     print(f"[!!] DELETION DETECTED: {path}")
                     send_fim_alert(alert)
-                    #alerts_col.insert_one({**alert, "time": time.ctime()})
                     del baseline[path]
                     hashes_col.delete_one({"filepath": path})
+
 
 def send_fim_alert(data):
     try:
@@ -432,35 +398,31 @@ def send_fim_alert(data):
 def main():
     global AGENT_HOSTNAME, SIEM_DB_URL, NETWORK_BACKEND_URL, CONFIG_URL, BACKEND_URL
 
-    parser =argparse.ArgumentParser(
-            description = "This is agent.py for windows"
-            )
-    parser.add_argument("--siem_db_url",type=str, default="mongodb://172.17.0.1:27018/", help="used to provide the siem database url")
-    parser.add_argument("--network_backend_url",type=str, default="http://172.17.0.1:8000/api/logs", help="used to provide the network alert to backend")
-    parser.add_argument("--config_url",type=str, default="http://172.17.0.1:8000/api/config",help="used to provide the config url")
-    parser.add_argument("--backend_url",type=str, default="http://172.17.0.1:8000/api/alerts",help="used to provide backend url")
-    parser.add_argument("--agent_hostname",type=str, default="no_nameHostname", help="used to provide agent hostname")
+    parser = argparse.ArgumentParser(
+        description="This is agent.py for windows"
+    )
+    parser.add_argument("--siem_db_url", type=str, default="mongodb://172.17.0.1:27018/", help="used to provide the siem database url")
+    parser.add_argument("--network_backend_url", type=str, default="http://172.17.0.1:8000/api/logs", help="used to provide the network alert to backend")
+    parser.add_argument("--config_url", type=str, default="http://172.17.0.1:8000/api/config", help="used to provide the config url")
+    parser.add_argument("--backend_url", type=str, default="http://172.17.0.1:8000/api/alerts", help="used to provide backend url")
+    parser.add_argument("--agent_hostname", type=str, default="no_nameHostname", help="used to provide agent hostname")
 
-    arguments=parser.parse_args()
-    SIEM_DB_URL=arguments.siem_db_url
-    NETWORK_BACKEND_URL=arguments.network_backend_url
-    CONFIG_URL=arguments.config_url
-    BACKEND_URL=arguments.backend_url
-    AGENT_HOSTNAME=arguments.agent_hostname    
+    arguments = parser.parse_args()
+    SIEM_DB_URL = arguments.siem_db_url
+    NETWORK_BACKEND_URL = arguments.network_backend_url
+    CONFIG_URL = arguments.config_url
+    BACKEND_URL = arguments.backend_url
+    AGENT_HOSTNAME = arguments.agent_hostname
 
-
-    # --- STEP 2: HANDLE PERMISSIONS & ELEVATION ---
-    # Ensure we have the rights to sniff packets (requires root/cap_net_raw)
     if not check_permissions():
         if os.geteuid() != 0:
             print(f"[*] SIEM Agent [{AGENT_HOSTNAME}] requires elevation.")
             try:
                 user = getpass.getuser()
                 pwd = getpass.getpass(prompt=f"[?] Enter sudo password for {user}: ")
-                # Re-run the script with sudo
                 cmd = ["sudo", "-S", "python3", sys.argv[0], AGENT_HOSTNAME]
                 proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, text=True)
-                proc.communicate(input=pwd + "\n")
+                proc.communicate(input=pwd + " ")
                 sys.exit(proc.returncode)
             except Exception as e:
                 print(f"[!] Elevation failed: {e}")
@@ -469,21 +431,15 @@ def main():
             print("[!] Fatal: Even as root, packet capture is unavailable.")
             sys.exit(1)
 
-    # --- STEP 5: DAEMONIZE FOR WEBSITE MODE ---
-    # If Nginx is present, we fork to run the agent as a background daemon
     if os.path.exists("/usr/sbin/nginx"):
         print("[*] Launching Nginx and backgrounding SIEM Agent...")
         pid = os.fork()
         if pid > 0:
-            # Parent process: Exits so the Docker entrypoint continues to Nginx
-            return 
-            
-        # Child process: Continues as the background SIEM agent
-        # Redirect standard IO to avoid cluttering the Nginx logs
-        sys.stdout = open('/var/log/siem_agent.log', 'a',buffering=1)
+            return
+
+        sys.stdout = open('/var/log/siem_agent.log', 'a', buffering=1)
         sys.stderr = open('/var/log/siem_agent.err', 'a', buffering=1)
 
-    # --- STEP 3: MONGODB CONNECTION ---
     client = None
     while True:
         try:
@@ -496,13 +452,8 @@ def main():
             print(f"[!] Connection failed: {e}. Retrying in 5s...")
             time.sleep(5)
 
-    # --- STEP 4: REGISTER HOSTNAME ---
-    # Do this before forking so the registry is updated immediately
     creating_hostname_collection(AGENT_HOSTNAME, client)
 
-
-    # --- STEP 6: START MONITORING THREADS ---
-    # We use a list to keep track of our security modules
     security_modules = [
         (run_fim_monitor, "FIM Integrity Watcher"),
         (start_network_sniffer, "Flow Aggregator (Network)"),
@@ -511,21 +462,19 @@ def main():
     for target_func, name in security_modules:
         thread = threading.Thread(target=target_func, args=(client,), daemon=True)
         thread.start()
-        # Note: If backgrounded, these prints go to devnull
         print(f"[+] Started {name} thread.")
 
-    # --- STEP 7: KEEP-ALIVE LOOP ---
     if not os.path.exists("/usr/sbin/nginx"):
         print(f"--- SIEM Agent [{AGENT_HOSTNAME}] is fully operational ---")
-    
+
     try:
         while True:
-            # You could add a 'heartbeat' here to update 'last_active' in MongoDB
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n[!] Shutdown signal received. Closing Agent...")
+        print("[!] Shutdown signal received. Closing Agent...")
         client.close()
         sys.exit(0)
+
 
 if __name__ == "__main__":
     main()

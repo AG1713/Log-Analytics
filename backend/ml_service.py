@@ -253,7 +253,7 @@ def extract_features(log):
     return scaler.transform(raw)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# MAIN PREDICTION PIPELINE
+# MAIN PREDICTION PIPELINE (UPDATED WITH NEW LOGIC)
 # ──────────────────────────────────────────────────────────────────────────────
 def predict(log: dict) -> "dict | None":
     load_models_once()
@@ -261,13 +261,17 @@ def predict(log: dict) -> "dict | None":
     if binary_model is None:
         return {"prediction": "Unknown", "attack_type": "Model Error", "confidence": 0.0, "anomaly": False, "severity": "low"}
 
-    # 1. NOISE FILTER GATE (both significant flag AND packet volume)
-    is_significant = log.get("is_significant", True)
-    spkts = _f(log, "spkts")
-    dpkts = _f(log, "dpkts")
-    
+    spkts, dpkts = _f(log, "spkts"), _f(log, "dpkts")
+    state_raw = str(log.get("state", "CON")).strip().upper()
+    is_sig = log.get("is_significant", True)
+
+    # ── SURGICAL OVERRIDE ──
+    # If it's a scan (RST) or DoS (INT), it is ALWAYS significant
+    if state_raw in ["RST", "INT"] and spkts >= 2:
+        is_sig = True
+
     # Auto-label low-volume heartbeats as Normal
-    if not is_significant or (spkts + dpkts < 5):
+    if not is_sig or (spkts + dpkts < 2):
         return {
             "prediction": "Normal", "attack_type": "None", "confidence": 1.0,
             "type_confidence": 1.0, "anomaly": False, "severity": "low",
@@ -284,9 +288,10 @@ def predict(log: dict) -> "dict | None":
     attack_prob = float(probs[attack_idx])
     benign_prob = 1.0 - attack_prob
 
-    # 2. INTERNAL CONTAINER THRESHOLD FIX (0.45 for Docker traffic)
+    # ── CONTAINER SENSITIVITY ──
     src_ip = str(log.get("src_ip", ""))
-    effective_threshold = 0.45 if src_ip.startswith("172.17.") else BINARY_THRESHOLD
+    # Lower threshold to 0.35 for RST (scans) and 0.45 for others
+    effective_threshold = 0.35 if state_raw == "RST" else 0.45
 
     if attack_prob >= effective_threshold:
         # Resolve attack type with soft voting
@@ -295,19 +300,9 @@ def predict(log: dict) -> "dict | None":
         attack_type = attack_enc.classes_[top_idx]
         type_conf = float(type_probs[0][top_idx])
 
-        # ── VETERAN SAFETY CHECKS ──
-        # Resolve "Suspicious Unknown" into "DoS" if it fits the signature
-        if (attack_type == "suspicious_unknown" or type_conf < 0.35) and _f(log, "dpkts") == 0:
+        # Override for DoS
+        if dpkts == 0 and attack_type == "suspicious_unknown":
             attack_type = "DoS"
-        
-        # Final safety: if still very low type confidence, call it Normal
-        if type_conf < 0.20 and attack_type == "suspicious_unknown":
-            return {
-                "prediction": "Normal", "attack_type": "None", 
-                "confidence": round(benign_prob, 4), 
-                "type_confidence": round(type_conf, 4),
-                "anomaly": False, "severity": "low"
-            }
 
         return {
             "prediction": "Attack",
