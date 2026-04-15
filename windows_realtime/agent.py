@@ -199,23 +199,17 @@ def process_packet(packet):
     if not packet.haslayer(IP):
         return
 
-
     now = datetime.now(timezone.utc)
     src_ip = packet[IP].src
     dst_ip = packet[IP].dst
     proto_num = packet[IP].proto
-    proto_str = PROTOCOL_MAP.get(proto_num, "other")
-    
-    # Identify ports
+    proto_str = PROTO_MAP.get(proto_num, "other")
+
     sport = packet[TCP].sport if packet.haslayer(TCP) else (packet[UDP].sport if packet.haslayer(UDP) else 0)
     dport = packet[TCP].dport if packet.haslayer(TCP) else (packet[UDP].dport if packet.haslayer(UDP) else 0)
 
-
-    # 1. Create a unique key for the flow (Direction Neutral)
     flow_key = tuple(sorted([(src_ip, sport), (dst_ip, dport)]))
 
-
-    # 2. Initialize new session
     if flow_key not in sessions:
         sessions[flow_key] = {
             "hostname": AGENT_HOSTNAME,
@@ -232,49 +226,46 @@ def process_packet(packet):
             "synack_time": None,
             "synack": 0, "ackdat": 0,
             "state": "REQ",
-            # Existing Tracking Fields
             "timestamps": [now.timestamp()],
             "syn_count": 0, "ack_count": 0, "fin_count": 0, "rst_count": 0,
             "ports_seen": {dport}
         }
 
-
-        # ── NEW: register this new connection in the per-IP window tracker ──
-        now_ts = now.timestamp()
         with ip_lock:
-            _prune_window(src_ip, now_ts)
-            ip_conn_times[src_ip].append(now_ts)
+            ip_conn_times[src_ip].append(now.timestamp())
             ip_ports_seen[src_ip].add(dport)
             ip_total_counts[src_ip] += 1
-
 
     session = sessions[flow_key]
     is_source = (src_ip == session["src_ip"] and sport == session["src_port"])
     pkt_len = len(packet)
-    
-    # Update core counters
+
     session["timestamps"].append(now.timestamp())
     session["last_packet_time"] = now
-    
+    session["ports_seen"].add(dport)
+
     if is_source:
         session["sbytes"] += pkt_len
         session["spkts"] += 1
     else:
         session["dbytes"] += pkt_len
         session["dpkts"] += 1
-        if session["dttl"] == 0: session["dttl"] = packet[IP].ttl
-        if session["dtcpb"] == 0 and packet.haslayer(TCP): session["dtcpb"] = packet[TCP].seq
+        if session["dttl"] == 0:
+            session["dttl"] = packet[IP].ttl
+        if session["dtcpb"] == 0 and packet.haslayer(TCP):
+            session["dtcpb"] = packet[TCP].seq
 
-
-    # Track TCP Flags
     if packet.haslayer(TCP):
         flags = packet[TCP].flags
-        if 'S' in flags: session["syn_count"] += 1
-        if 'A' in flags: session["ack_count"] += 1
-        if 'F' in flags: session["fin_count"] += 1
-        if 'R' in flags: session["rst_count"] += 1
-        
-        # Handshake Logic
+        if 'S' in flags:
+            session["syn_count"] += 1
+        if 'A' in flags:
+            session["ack_count"] += 1
+        if 'F' in flags:
+            session["fin_count"] += 1
+        if 'R' in flags:
+            session["rst_count"] += 1
+
         if not is_source and 'S' in flags and 'A' in flags:
             if session["syn_time"]:
                 session["synack"] = (now - session["syn_time"]).total_seconds()
@@ -284,110 +275,65 @@ def process_packet(packet):
             session["ackdat"] = (now - session["synack_time"]).total_seconds()
             session["synack_time"] = None
 
-
-    # 6. Termination & Shipping Logic
     duration = (now - session["start_time"]).total_seconds()
     should_ship = False
 
-
-    # Check for forced termination
     if packet.haslayer(TCP) and ('F' in packet[TCP].flags or 'R' in packet[TCP].flags):
         session["state"] = "FIN" if 'F' in packet[TCP].flags else "RST"
         should_ship = True
-    elif duration >= 10: # Keep duration at 10 seconds as requested
+    elif duration >= 10:
         should_ship = True
     elif (session["spkts"] + session["dpkts"]) > 50:
         should_ship = True
 
-
     if should_ship:
-        # If we didn't see a SYN but we saw traffic in both directions, 
-        # it's an established connection we caught mid-stream.
         if session["syn_count"] == 0 and (session["spkts"] > 0 and session["dpkts"] > 0):
-            session["state"] = "CON" 
+            session["state"] = "CON"
         elif session["syn_count"] > 0 and session["dpkts"] == 0:
-            session["state"] = "INT" # Interrupted / No response (common in SYN floods)
+            session["state"] = "INT"
 
-
-        # ── NEW: mark failed flows for failed_connection_ratio ──
         if session["state"] in ("INT", "RST"):
             with ip_lock:
                 ip_failed_counts[session["src_ip"]] += 1
 
-
-        # Calculate IAT (Inter-Arrival Times)
         iat_list = [t2 - t1 for t1, t2 in zip(session["timestamps"], session["timestamps"][1:])]
         mean_iat = statistics.mean(iat_list) if iat_list else 0
-        std_iat  = statistics.stdev(iat_list) if len(iat_list) > 1 else 0
-        
-        total_pkts  = session["spkts"] + session["dpkts"]
+        std_iat = statistics.stdev(iat_list) if len(iat_list) > 1 else 0
+
+        total_pkts = session["spkts"] + session["dpkts"]
         total_bytes = session["sbytes"] + session["dbytes"]
-        
-        # Determine Service (Simple mapping by destination port)
+
         service = "-"
         if session["dst_port"] in SERVICE_MAP:
             service = SERVICE_MAP.get(session["dst_port"], "-")
         elif session["src_port"] in SERVICE_MAP:
             service = SERVICE_MAP.get(session["src_port"], "-")
 
-
-        # ── NEW FEATURES ─────────────────────────────────────────────────────
-
-
-        # 1. flow_bytes – total bytes exchanged in this flow (sbytes + dbytes)
         flow_bytes = total_bytes
-
-
-        # 2. bytes_per_pkt – average bytes per packet across the whole flow
         bytes_per_pkt = (total_bytes / total_pkts) if total_pkts > 0 else 0
-
-
-        # 3. syn_ratio – fraction of packets that carried a SYN flag
-        #     High values (near 1.0) indicate SYN-flood style behaviour
         syn_ratio = (session["syn_count"] / total_pkts) if total_pkts > 0 else 0
-
-
-        # 4. ack_ratio – fraction of packets that carried an ACK flag
-        #     Normal established flows hover around 1.0; very low values are suspicious
         ack_ratio = (session["ack_count"] / total_pkts) if total_pkts > 0 else 0
-
-
-        # 5. rst_ratio – fraction of packets that carried a RST flag
-        #     Elevated values suggest port-scanning or aggressive connection teardown
         rst_ratio = (session["rst_count"] / total_pkts) if total_pkts > 0 else 0
-
-
-        # 6. iat_ratio – coefficient of variation of inter-arrival times (std / mean)
-        #     High value → bursty / irregular traffic; low value → steady stream
         iat_ratio = (std_iat / mean_iat) if mean_iat > 0 else 0
 
-
-        # 7–9  Per-IP window metrics (thread-safe snapshot)
         flow_src_ip = session["src_ip"]
         now_ts = now.timestamp()
         with ip_lock:
             _prune_window(flow_src_ip, now_ts)
-
-
-            # 7. unique_ports_per_ip – distinct dst ports this src IP has
-            #     contacted since agent start (port-scan indicator)
             unique_ports_per_ip = len(ip_ports_seen[flow_src_ip])
-
-
-            # 8. connections_per_ip_window – how many connections this src IP
-            #     has opened inside the last IP_WINDOW_SECONDS seconds
             connections_per_ip_window = len(ip_conn_times[flow_src_ip])
-
-
-            # 9. failed_connection_ratio – ratio of failed (INT / RST) flows
-            #     to total flows for this src IP since agent start
-            total_for_ip  = ip_total_counts[flow_src_ip]
+            total_for_ip = ip_total_counts[flow_src_ip]
             failed_for_ip = ip_failed_counts[flow_src_ip]
             failed_connection_ratio = (failed_for_ip / total_for_ip) if total_for_ip > 0 else 0
 
+        # Ensure duration is at least 0.001 to prevent zero-rate issues
+        eff_dur = duration if duration > 0.001 else 0.001
 
-        # ─────────────────────────────────────────────────────────────────────
-
+        # VETERAN FIX: Port scans are fast (low duration) but high impact
+        # We mark it significant if it's very fast OR has many packets
+        is_significant = True
+        if total_pkts < 3 and duration > 5:
+            is_significant = False
 
         final_log = {
             "hostname": session["hostname"],
@@ -403,10 +349,10 @@ def process_packet(packet):
             "sttl": session["sttl"], "dttl": session["dttl"],
             "synack": session["synack"], "ackdat": session["ackdat"],
             "stcpb": session["stcpb"], "dtcpb": session["dtcpb"],
-            # Original Engineered Features
-            "rate": (total_bytes / duration) if duration > 0 else 0,
-            "pkt_rate": (total_pkts / duration) if duration > 0 else 0,
-            "byte_rate": (total_bytes / duration) if duration > 0 else 0,
+            "rate": (total_bytes / eff_dur),
+            "pkt_rate": (total_pkts / eff_dur),
+            "byte_rate": (total_bytes / eff_dur),
+            "is_significant": is_significant,
             "flow_ratio": session["spkts"] / (session["dpkts"] + 1),
             "syn_count": session["syn_count"],
             "ack_count": session["ack_count"],
@@ -416,28 +362,24 @@ def process_packet(packet):
             "std_iat": std_iat,
             "flow_packets": total_pkts,
             "port_count": len(session["ports_seen"]),
-            # ── NEW Features ──────────────────────────────────────────────────
-            "flow_bytes": flow_bytes,                                # total bytes in flow
-            "bytes_per_pkt": bytes_per_pkt,                          # avg bytes / packet
-            "syn_ratio": syn_ratio,                                  # SYN pkts / total pkts
-            "ack_ratio": ack_ratio,                                  # ACK pkts / total pkts
-            "rst_ratio": rst_ratio,                                  # RST pkts / total pkts
-            "iat_ratio": iat_ratio,                                  # std_iat / mean_iat (CoV)
-            "unique_ports_per_ip": unique_ports_per_ip,              # distinct dst ports (src IP)
-            "connections_per_ip_window": connections_per_ip_window,  # conns in sliding window
-            "failed_connection_ratio": failed_connection_ratio,      # failed / total (src IP)
-            # ─────────────────────────────────────────────────────────────────
+            "flow_bytes": flow_bytes,
+            "bytes_per_pkt": bytes_per_pkt,
+            "syn_ratio": syn_ratio,
+            "ack_ratio": ack_ratio,
+            "rst_ratio": rst_ratio,
+            "iat_ratio": iat_ratio,
+            "unique_ports_per_ip": unique_ports_per_ip,
+            "connections_per_ip_window": connections_per_ip_window,
+            "failed_connection_ratio": failed_connection_ratio,
             "processed": False
         }
 
-
-        # Filter and Send
         if final_log["dst_port"] not in [27018, 8000] and final_log["src_port"] not in [27018, 8000]:
             try:
                 requests.post(NETWORK_BACKEND_URL, json=final_log, timeout=10)
             except Exception as e:
                 print(f"[!] Shipping failed: {e}")
-        
+
         del sessions[flow_key]
 
 
