@@ -99,17 +99,14 @@ async def remove_path(request: Request):
 
 
 @router.post("/alerts")
-async def receive_alert(request: Request):
-    alert_data = await request.json()
-    result = db.alerts.insert_one(alert_data)
-
-    send_email_notification(
-        alert_data.get("type", "FIM_ALERT"),
-        alert_data.get("file", "Unknown"),
-        alert_data.get("severity", "High"),
-    )
-    print(f"[+] FIM Alert Received and Saved: {result.inserted_id}")
-    return {"status": "success", "id": str(result.inserted_id)}
+async def create_alert(alert_data: dict):
+    # Convert the ISO string back into a Python datetime object
+    if "timestamp" in alert_data:
+        alert_data["timestamp"] = datetime.fromisoformat(alert_data["timestamp"])
+    
+    # Now PyMongo will see a datetime object and store a BSON Date!
+    db.alerts.insert_one(alert_data)
+    return {"status": "success"}
 
 
 @router.get("/alerts")

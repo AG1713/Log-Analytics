@@ -65,7 +65,7 @@ class networkPackets():
                 "synack_time": None,
                 "synack": 0, "ackdat": 0,
                 "state": "REQ",
-                "timestamps": [now.timestamp()],
+                "timestamps": [now],
                 "syn_count": 0, "ack_count": 0, "fin_count": 0, "rst_count": 0,
                 "ports_seen": {dport}
             }
@@ -79,7 +79,7 @@ class networkPackets():
         is_source = (src_ip == session["src_ip"] and sport == session["src_port"])
         pkt_len = len(packet)
 
-        session["timestamps"].append(now.timestamp())
+        session["timestamps"].append(now)
         session["last_packet_time"] = now
         session["ports_seen"].add(dport)
 
@@ -135,7 +135,8 @@ class networkPackets():
                 with self.ip_lock:
                     self.ip_failed_counts[session["src_ip"]] += 1
 
-            iat_list = [t2 - t1 for t1, t2 in zip(session["timestamps"], session["timestamps"][1:])]
+            # Updated IAT calculation for datetime objects
+            iat_list = [(t2 - t1).total_seconds() for t1, t2 in zip(session["timestamps"], session["timestamps"][1:])]
             mean_iat = statistics.mean(iat_list) if iat_list else 0
             std_iat = statistics.stdev(iat_list) if len(iat_list) > 1 else 0
 
@@ -274,7 +275,7 @@ class fimAlerts():
                             {"$set": {
                                 "hostname": AGENT_HOSTNAME,
                                 "hash": file_hash,
-                                "last_check": time.time()
+                                "last_check": datetime.now(timezone.utc) 
                             }},
                             upsert=True
                         )
@@ -398,7 +399,7 @@ def main():
     parser.add_argument("--network_backend_url", type=str, default="http://172.17.0.1:8000/api/logs", help="used to provide the network alert to backend")
     parser.add_argument("--config_url", type=str, default="http://172.17.0.1:8000/api/config", help="used to provide the config url")
     parser.add_argument("--backend_url", type=str, default="http://172.17.0.1:8000/api/alerts", help="used to provide backend url")
-    parser.add_argument("--agent_hostname", type=str, default="no_nameHostname", help="used to provide agent hostname")
+    parser.add_argument("--agent_hostname", type=str, default="host1", help="used to provide agent hostname")
 
     arguments = parser.parse_args()
     SIEM_DB_URL = arguments.siem_db_url
