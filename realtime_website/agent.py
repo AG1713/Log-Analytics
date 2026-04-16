@@ -309,7 +309,15 @@ class fimAlerts():
                             }
                             self.send_fim_alert(alert)
                             baseline[full_path] = current_hash
-                            hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}}, upsert=True)
+                            hashes_col.update_one(
+                                {"filepath": full_path}, 
+                                {"$set": {
+                                    "hostname": AGENT_HOSTNAME,
+                                    "hash": current_hash,
+                                    "last_check": now  # Using the aware datetime you defined earlier
+                                }}, 
+                                upsert=True
+                            )
 
                         elif current_hash != baseline[full_path]:
                             alert = {
@@ -321,7 +329,14 @@ class fimAlerts():
                             }
                             self.send_fim_alert(alert)
                             baseline[full_path] = current_hash
-                            hashes_col.update_one({"filepath": full_path}, {"$set": {"hash": current_hash}})
+                            hashes_col.update_one(
+                                {"filepath": full_path},
+                                {"$set": {
+                                    "hostname": AGENT_HOSTNAME,
+                                    "hash": current_hash,
+                                    "last_check": now
+                                }}
+                            )
 
             baseline_paths = list(baseline.keys())
             for path in baseline_paths:

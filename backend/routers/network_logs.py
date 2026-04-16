@@ -114,6 +114,8 @@ async def receive_logs(request: Request):
         for log in logs:
             log["received_at"] = datetime.now(timezone.utc)
             log["processed"] = False
+            if "timestamp" in log:
+                log["timestamp"] = datetime.fromisoformat(log["timestamp"])
 
         result = db.network_logs.insert_many(logs)
         return {
