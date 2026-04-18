@@ -52,9 +52,79 @@ async def get_devices():
         return {"devices": unique_hostnames, "count": len(unique_hostnames)}
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=f"MongoDB error: {str(e)}")
+    
+
+@router.get("/network/logs")
+def get_network_logs(limit: int = 50):
+    try:
+        # Fetching directly from network_logs
+        logs = list(db.network_logs.find().sort("timestamp", -1).limit(limit))
+        
+        formatted_logs = []
+        for log in logs:
+            log["_id"] = str(log["_id"])  # Ensure ObjectId is serialized
+            formatted_logs.append(log)
+            
+        return formatted_logs
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
 
 @router.get("/network/stream")
+async def stream_network(request: Request, hostname: str = None):
+    """Streams live raw network logs via Server-Sent Events (SSE)."""
+    
+    async def log_generator():
+        try:
+            # 1. Find the latest document ID so we only stream NEW logs from this point forward
+            latest_log = db.network_logs.find_one(sort=[("_id", -1)])
+            last_id = latest_log["_id"] if latest_log else ObjectId("000000000000000000000000")
+
+            while True:
+                # 2. Break the loop if the user navigates away or toggles the stream off
+                if await request.is_disconnected():
+                    break
+
+                # 3. Build query for logs newer than our last seen ID
+                query = {"_id": {"$gt": last_id}}
+                if hostname:
+                    query["hostname"] = hostname
+
+                # Fetch new logs in chronological order
+                new_docs = list(db.network_logs.find(query).sort("_id", 1))
+
+                if new_docs:
+                    # Update our tracker to the newest ID
+                    last_id = new_docs[-1]["_id"]
+                    
+                    # Format for frontend (fix the ObjectId serialization)
+                    formatted_docs = []
+                    for doc in new_docs:
+                        doc["_id"] = str(doc["_id"])
+                        formatted_docs.append(doc)
+
+                    # 4. Yield the SSE formatted string (must start with 'data: ' and end with '\n\n')
+                    yield f"data: {json.dumps(formatted_docs)}\n\n"
+
+                # 5. Pause for 1 second before checking again to prevent CPU spam
+                await asyncio.sleep(1)
+                
+        except Exception as e:
+            # Send an error event to the frontend if something crashes
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(log_generator(), media_type="text/event-stream")
+
+
+@router.get("/predictions/logs")
+def get_logs(limit: int = 50):
+    try:
+        logs = list(db.predictions.find().sort("timestamp", -1).limit(limit))
+        return [serialize(log) for log in logs]
+    except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=f"MongoDB error: {str(e)}")
+
+@router.get("/predictions/stream")
 async def stream_network_logs(request: Request, hostname: str = Query(default=None)):
     async def event_generator():
         last_id = None
@@ -127,12 +197,3 @@ async def receive_logs(request: Request):
         raise HTTPException(status_code=500, detail=f"MongoDB insert failed: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
-
-
-@router.get("/network/logs")
-def get_logs(limit: int = 50):
-    try:
-        logs = list(db.predictions.find().sort("timestamp", -1).limit(limit))
-        return [serialize(log) for log in logs]
-    except PyMongoError as e:
-        raise HTTPException(status_code=500, detail=f"MongoDB error: {str(e)}")

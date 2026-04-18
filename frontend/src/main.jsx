@@ -6,7 +6,7 @@ import App from './App.jsx'
 import AppLayout from "./AppLayout";
 import Dashboard from "./pages/dashboard/Dashboard";
 import Fim from "./pages/fim/Fim";
-import Alerts from "./pages/alerts/Alerts";
+import Analysis from "./pages/analysis/Analysis";
 import Chatbot from "./pages/chatbot/Chatbot";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -31,12 +31,12 @@ const router = createBrowserRouter([
         element: <Dashboard/>
       },
       {
-        path: "/alerts",
-        element: <Alerts/>
-      },
-      {
         path: "/chatbot",
         element: <Chatbot/>
+      },
+      {
+        path: "/analysis",
+        element: <Analysis/>
       },
       {
         path: "/fim",

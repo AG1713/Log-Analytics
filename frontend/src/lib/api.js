@@ -6,14 +6,17 @@ const del  = (url, body) => fetch(`${BASE}${url}`, { method: "DELETE", headers: 
 
 export const api = {
   // ML / Dashboard
-  fetchAttackSummary:  () => get("/api/attack-summary"),   // ← fixed: was /attack_summary (old CSV endpoint)
-  fetchTrafficTimeline: (hours = 6) => get(`/api/traffic-timeline?hours=${hours}`), // ← NEW
-  fetchAttackTimeline: (hours = 6) => get(`/api/attack-timeline?hours=${hours}`),  // ← new
-  fetchNetworkLogs:    (limit = 50) => get(`/api/network/logs?limit=${limit}`),     // ← new (initial table load)
+  fetchAttackSummary:  () => get("/api/attack-summary"),
+  fetchTrafficTimeline: (hours = 6) => get(`/api/traffic-timeline?hours=${hours}`),
+
+
+  // Analysis page
+  fetchAnalysisSummary: () => get("/api/analysis-summary"),
+  fetchAttackTimeline: (hours = 6) => get(`/api/attack-timeline?hours=${hours}`),
 
   // Quick Triage
-  fetchRecentAttacks:  (limit = 5) => get(`/api/recent-attacks?limit=${limit}`),    // ← NEW
-  fetchRecentFim:      (limit = 5) => get(`/api/recent-fim?limit=${limit}`),        // ← NEW
+  fetchRecentAttacks:  (limit = 5) => get(`/api/recent-attacks?limit=${limit}`),
+  fetchRecentFim:      (limit = 5) => get(`/api/recent-fim?limit=${limit}`),
 
   // Devices
   fetchDevices:        () => get("/api/devices"),
@@ -28,9 +31,25 @@ export const api = {
   addPath:             (path, hostname) => post("/api/add_path", { path, hostname }),
   removePath:          (path, hostname) => del("/api/config/path", { path, hostname }),
 
-  // Network stream (SSE)
-  streamNetwork: (hostname) => {
+  // Prediction logs
+  fetchPredictions:    (limit = 50) => get(`/api/predictions/logs?limit=${limit}`),
+  streamPredictions: (hostname) => {
+    const params = hostname ? `?hostname=${hostname}` : "";
+    return new EventSource(`${BASE}/api/predictions/stream${params}`);
+  },
+
+  // Predict
+  // fetchPredictionLogs: (limit = 100) => get(`/api/predictions/logs?limit=${limit}`),
+  // streamPredictions: (hostname) => {
+  //   const params = hostname ? `?hostname=${hostname}` : "";
+  //   return new EventSource(`${BASE}/api/predictions/stream${params}`); // NEW!
+  // },
+
+  // Network logs
+  fetchNetworkLogs:    (limit = 50) => get(`/api/network/logs?limit=${limit}`),
+  streamNetworkLogs: (hostname) => {
     const params = hostname ? `?hostname=${hostname}` : "";
     return new EventSource(`${BASE}/api/network/stream${params}`);
   },
+
 };

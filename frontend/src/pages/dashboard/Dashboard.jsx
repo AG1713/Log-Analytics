@@ -159,28 +159,57 @@ export default function Dashboard() {
   const devices = devicesData?.devices || [];
 
   // Initial load for live table
-  const { data: initialLogs = [] } = useQuery({
-    queryKey: ["networkLogs"],
-    queryFn:  () => api.fetchNetworkLogs(50),
-    enabled:  showNetworkLogs,
-    staleTime: 0,
-  });
+  // const { data: initialLogs = [] } = useQuery({
+  //   queryKey: ["networkLogs"],
+  //   queryFn:  () => api.fetchNetworkLogs(50),
+  //   enabled:  showNetworkLogs,
+  //   staleTime: 0,
+  // });
 
-  useEffect(() => {
-    if (initialLogs.length > 0 && networkLogs.length === 0) {
-      setNetworkLogs(initialLogs);
-    }
-  }, [initialLogs]);
+  // useEffect(() => {
+  //   if (initialLogs.length > 0 && networkLogs.length === 0) {
+  //     setNetworkLogs(initialLogs);
+  //   }
+  // }, [initialLogs]);
 
   // SSE for live network logs
+  // useEffect(() => {
+  //   if (!showNetworkLogs) {
+  //     setNetworkLogs([]);
+  //     return;
+  //   }
+
+  //   setNetworkLogs([]);
+  //   const es = api.streamNetworkLogs(selectedDevice);
+
+  //   es.onmessage = (e) => {
+  //     try {
+  //       const incoming = JSON.parse(e.data);
+  //       if (!Array.isArray(incoming) || incoming.error) return;
+  //       setNetworkLogs(prev => {
+  //         const existingIds = new Set(prev.map(l => l._id));
+  //         const newOnly = incoming.filter(l => !existingIds.has(l._id));
+  //         return [...newOnly, ...prev].slice(0, 100);
+  //       });
+  //     } catch {}
+  //   };
+  //   es.onerror = () => es.close();
+  //   return () => es.close();
+  // }, [showNetworkLogs, selectedDevice]);\
+
   useEffect(() => {
     if (!showNetworkLogs) {
       setNetworkLogs([]);
       return;
     }
 
-    setNetworkLogs([]);
-    const es = api.streamNetwork(selectedDevice);
+    // 1. Fetch a fresh snapshot immediately so the table isn't empty
+    api.fetchNetworkLogs(50)
+      .then(logs => setNetworkLogs(logs))
+      .catch(() => setNetworkLogs([]));
+
+    // 2. Open the live stream to append new logs
+    const es = api.streamNetworkLogs(selectedDevice);
 
     es.onmessage = (e) => {
       try {
@@ -193,7 +222,9 @@ export default function Dashboard() {
         });
       } catch {}
     };
+
     es.onerror = () => es.close();
+    
     return () => es.close();
   }, [showNetworkLogs, selectedDevice]);
 
@@ -442,67 +473,34 @@ export default function Dashboard() {
       </div>
 
       {showNetworkLogs && (
-        <Card>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-                {["TIME", "HOSTNAME", "SRC IP", "SRC_PORT", "DST IP", "DST_PORT", "PROTO", "SERVICE", "ATTACK TYPE", "SEVERITY", "CONFIDENCE"].map(h => (
-                  <th key={h} style={{ textAlign: "left", padding: "6px 10px", color: "#1a3a5a", fontWeight: 500, fontSize: "10px", letterSpacing: "0.05em" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {networkLogs.length === 0 ? (
-                <tr>
-                  <td colSpan={11} style={{ padding: "24px 10px", color: COLORS.muted, textAlign: "center", fontSize: "12px" }}>
-                    Waiting for packets...
-                  </td>
-                </tr>
-              ) : networkLogs.map((log, i) => (
-                <tr
-                  key={log._id || i}
-                  style={{
-                    borderBottom: `1px solid #080f1a`,
-                    background: log.attack && log.attack !== "BENIGN" && log.attack !== "Normal"
-                      ? `${COLORS.red}08`
-                      : "transparent",
-                  }}
-                >
-                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "10px", whiteSpace: "nowrap" }}>
-                    {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : "—"}
-                  </td>
-                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan, fontSize: "10px", whiteSpace: "nowrap" }}>
-                    {log.hostname || "—"}
-                  </td>
-                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan, fontSize: "10px", whiteSpace: "nowrap" }}>
-                    {log.src_ip || "—"}
-                  </td>
-                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan, fontSize: "10px", whiteSpace: "nowrap" }}>
-                    {log.src_port || "—"}
-                  </td>
-                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.text, fontSize: "10px", whiteSpace: "nowrap" }}>
-                    {log.dst_ip || "—"}
-                  </td>
-                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan, fontSize: "10px", whiteSpace: "nowrap" }}>
-                    {log.dst_port || "—"}
-                  </td>
-                  <td style={{ padding: "7px 10px" }}>
-                    <ProtoBadge proto={log.proto} />
-                  </td>
-                  <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.muted, fontSize: "10px" }}>
-                    {log.service && log.service !== "-" ? log.service.toUpperCase() : "—"}
-                  </td>
-                  <td style={{ padding: "7px 10px" }}>
-                    <AttackBadge attack={log.attack_type} />
-                  </td>
-                  <td style={{ padding: "7px 10px" }}>
-                    <SeverityBadge severity={log.severity} />
-                  </td>
-                  <td style={{ padding: "7px 10px", fontFamily: "monospace", fontSize: "10px", color: log.confidence >= 0.9 ? COLORS.red : log.confidence >= 0.7 ? COLORS.amber : COLORS.green }}>
-                    {log.confidence != null ? `${(log.confidence * 100).toFixed(1)}%` : "—"}
-                  </td>
-                </tr>
-              ))}
+    <Card>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+        <thead>
+          <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
+            {["TIME", "HOSTNAME", "SRC IP", "SRC PORT", "DST IP", "DST PORT", "PROTO", "SERVICE", "STATE", "DURATION", "PACKETS", "BYTES"].map(h => (
+              <th key={h} style={{ textAlign: "left", padding: "6px 10px", color: "#1a3a5a", fontWeight: 500, fontSize: "10px", letterSpacing: "0.05em" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {networkLogs.length === 0 ? (
+            <tr><td colSpan={12} style={{ padding: "24px", color: COLORS.muted, textAlign: "center" }}>Waiting for packets...</td></tr>
+          ) : networkLogs.map((log, i) => (
+            <tr key={log._id || i} style={{ borderBottom: `1px solid #080f1a` }}>
+              <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.muted }}>{log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : "—"}</td>
+              <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan }}>{log.hostname || "—"}</td>
+              <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.text }}>{log.src_ip || "—"}</td>
+              <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan }}>{log.src_port || "—"}</td>
+              <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.text }}>{log.dst_ip || "—"}</td>
+              <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan }}>{log.dst_port || "—"}</td>
+              <td style={{ padding: "7px 10px" }}><ProtoBadge proto={log.proto} /></td>
+              <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.muted }}>{log.service && log.service !== "-" ? log.service.toUpperCase() : "—"}</td>
+              <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.purple }}>{log.state || "—"}</td>
+              <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.muted }}>{log.dur != null ? `${log.dur.toFixed(2)}s` : "—"}</td>
+              <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.cyan }}>{log.flow_packets != null ? log.flow_packets.toLocaleString() : "—"}</td>
+              <td style={{ padding: "7px 10px", fontFamily: "monospace", color: COLORS.orange }}>{log.flow_bytes != null ? `${(log.flow_bytes / 1024).toFixed(1)} KB` : "—"}</td>
+            </tr>
+          ))}
             </tbody>
           </table>
         </Card>

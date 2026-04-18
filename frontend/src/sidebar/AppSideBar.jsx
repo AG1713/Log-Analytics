@@ -1,10 +1,10 @@
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger } from '@/components/ui/sidebar'
-import { LayoutDashboard, ShieldAlert, Bot, FolderSearch } from 'lucide-react'
+import { LayoutDashboard, ShieldAlert, Bot, FolderSearch, Search } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 
 const sidebarItems = [
   { label: "Dashboard",  icon: LayoutDashboard, path: "/" },
-  { label: "Alerts",     icon: ShieldAlert,     path: "/alerts" },
+  { label: "Analysis",     icon: Search,     path: "/analysis" },
   { label: "Chatbot",    icon: Bot,             path: "/chatbot" },
   { label: "FIM",        icon: FolderSearch,    path: "/fim" },
 ]

@@ -10,61 +10,6 @@ router = APIRouter(prefix="/api", tags=["Dashboard"])
 
 NORMAL_LABEL = "Normal"
 
-
-@router.get("/attack-summary-1")
-def attack_summary():
-    try:
-        total_records = db.network_logs.count_documents({})
-        total_attacks = db.predictions.count_documents({"attack": {"$ne": NORMAL_LABEL}})
-        total_normal = db.predictions.count_documents({"attack": NORMAL_LABEL})
-
-        attack_data = db.predictions.aggregate([
-            {"$group": {"_id": "$attack", "count": {"$sum": 1}}}
-        ])
-        attack_distribution = {
-            str(item["_id"]) if item["_id"] is not None else "Unknown": item["count"]
-            for item in attack_data
-        }
-
-        severity_data = db.predictions.aggregate([
-            {"$group": {"_id": "$severity", "count": {"$sum": 1}}}
-        ])
-        severity_distribution = {
-            str(item["_id"]) if item["_id"] is not None else "Unknown": item["count"]
-            for item in severity_data
-        }
-
-        proto_data = db.predictions.aggregate([
-            {"$group": {"_id": "$proto", "count": {"$sum": 1}}}
-        ])
-        protocol_distribution = {
-            str(item["_id"]) if item["_id"] is not None else "Unknown": item["count"]
-            for item in proto_data
-        }
-
-        service_data = db.predictions.aggregate([
-            {"$group": {"_id": "$service", "count": {"$sum": 1}}}
-        ])
-        service_distribution = {
-            str(item["_id"]) if item["_id"] is not None else "Unknown": item["count"]
-            for item in service_data
-        }
-
-        return {
-            "total_records": total_records,
-            "total_attacks": total_attacks,
-            "total_normal": total_normal,
-            "attack_distribution": attack_distribution,
-            "severity_distribution": severity_distribution,
-            "protocol_distribution": protocol_distribution,
-            "service_distribution": service_distribution,
-        }
-
-    except PyMongoError as e:
-        raise HTTPException(status_code=500, detail=f"MongoDB error: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
-
 @router.get("/attack-summary")
 def attack_summary():
     try:
@@ -73,14 +18,13 @@ def attack_summary():
         total_attacks = db.predictions.count_documents({"attack": {"$ne": NORMAL_LABEL}})
         total_normal = db.predictions.count_documents({"attack": NORMAL_LABEL})
         
-        # --- NEW METRICS FOR STATCARDS ---
         # Get unique source IPs from network logs
         unique_ips = len(db.network_logs.distinct("src_ip"))
         
         # Get specific counts for your currently supported models
-        dos_count = db.predictions.count_documents({"attack": "DoS"})
+        dos_count = db.predictions.count_documents({"attack_type": "DoS"})
         # Assuming your label might be "Reconnaissance" or "Port Scan"
-        port_scan_count = db.predictions.count_documents({"attack": {"$in": ["Port Scan", "Reconnaissance"]}})
+        port_scan_count = db.predictions.count_documents({"attack_type": {"$in": ["Port Scan", "Reconnaissance"]}})
 
         proto_data = db.predictions.aggregate([
             {"$group": {"_id": "$proto", "count": {"$sum": 1}}}
@@ -162,11 +106,11 @@ def traffic_timeline(hours: int = 6):
             {
                 "$group": {
                     "_id": {
-                        "y": {"$year": {"$toDate": "$timestamp"}},
-                        "m": {"$month": {"$toDate": "$timestamp"}},
-                        "d": {"$dayOfMonth": {"$toDate": "$timestamp"}},
-                        "h": {"$hour": {"$toDate": "$timestamp"}},
-                        "minute": {"$minute": {"$toDate": "$timestamp"}}
+                        "y": {"$year": "$timestamp"},
+                        "m": {"$month": "$timestamp"},
+                        "d": {"$dayOfMonth": "$timestamp"},
+                        "h": {"$hour": "$timestamp"},
+                        "minute": {"$minute": "$timestamp"}
                     },
                     "volume": {"$sum": 1}
                 }
@@ -270,62 +214,89 @@ def live_attacks():
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
 
-@router.get("/attack-timeline")
-def get_attack_timeline(hours: int = 6):
+@router.get("/analysis-summary")
+def analysis_summary():
     try:
-        time_threshold = datetime.now(timezone.utc) - timedelta(hours=hours)
+        # 1. Total flagged attacks (everything EXCEPT normal/benign)
+        total_attacks = db.predictions.count_documents({"attack": {"$nin": [NORMAL_LABEL, "BENIGN"]}})
 
+        # 2. Specific KPI counts
+        dos_count = db.predictions.count_documents({"attack_type": "DoS"})
+        port_scan_count = db.predictions.count_documents({"attack_type": {"$in": ["Port Scan", "Reconnaissance"]}})
+
+        # 3. Data for the "Attack Signatures" Pie Chart
         pipeline = [
-            {"$match": {"timestamp": {"$gte": time_threshold}}},
+            # Only group actual attacks
+            {"$match": {"attack": {"$nin": [NORMAL_LABEL, "BENIGN"]}}},
+            # Count them up
+            {"$group": {"_id": "$attack_type", "count": {"$sum": 1}}}
+        ]
+        attack_data = db.predictions.aggregate(pipeline)
+
+        # Format it cleanly as a dictionary for the frontend
+        attack_distribution = {
+            str(item["_id"]) if item["_id"] is not None else "Unknown": item["count"]
+            for item in attack_data
+        }
+
+        return {
+            "total_attacks": total_attacks,
+            "dos_count": dos_count,
+            "port_scan_count": port_scan_count,
+            "active_investigations": 3, # Placeholder for your Alerts engine later
+            "attack_distribution": attack_distribution
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+@router.get("/attack-timeline")
+def attack_timeline(hours: int = 6):
+    """Aggregates predictions by minute, splitting counts by attack type"""
+    try:
+        start_time = datetime.utcnow() - timedelta(hours=hours)
+        
+        # Note: Since we verified your predictions collection uses native ISODates, 
+        # we don't need the $toDate string-parsing trick here!
+        pipeline = [
+            {"$match": {"timestamp": {"$gte": start_time}}},
             {
                 "$group": {
                     "_id": {
-                        "year": {"$year": "$timestamp"},
-                        "month": {"$month": "$timestamp"},
-                        "day": {"$dayOfMonth": "$timestamp"},
-                        "hour": {"$hour": "$timestamp"},
+                        "y": {"$year": "$timestamp"},
+                        "m": {"$month": "$timestamp"},
+                        "d": {"$dayOfMonth": "$timestamp"},
+                        "h": {"$hour": "$timestamp"},
+                        "minute": {"$minute": "$timestamp"}
                     },
-                    "total_traffic": {"$sum": 1},
-                    "attacks": {
-                        "$sum": {
-                            "$cond": [{"$ne": ["$attack", NORMAL_LABEL]}, 1, 0]
-                        }
+                    # Count specific attack types
+                    "dos_count": {
+                        "$sum": {"$cond": [{"$eq": ["$attack_type", "DoS"]}, 1, 0]}
                     },
-                    "normal": {
-                        "$sum": {
-                            "$cond": [{"$eq": ["$attack", NORMAL_LABEL]}, 1, 0]
-                        }
+                    "port_scan_count": {
+                        "$sum": {"$cond": [{"$in": ["$attack_type", ["Port Scan", "Reconnaissance"]]}, 1, 0]}
                     },
+                    "normal_count": {
+                        "$sum": {"$cond": [{"$eq": ["$attack_type", NORMAL_LABEL]}, 1, 0]}
+                    }
                 }
             },
-            {
-                "$sort": {
-                    "_id.year": 1,
-                    "_id.month": 1,
-                    "_id.day": 1,
-                    "_id.hour": 1,
-                }
-            },
+            {"$sort": {"_id.y": 1, "_id.m": 1, "_id.d": 1, "_id.h": 1, "_id.minute": 1}}
         ]
-
-        results = list(db.predictions.aggregate(pipeline))
-
+        
+        results = db.predictions.aggregate(pipeline)
+        
         formatted_data = []
-        for res in results:
-            dt_str = (
-                f"{res['_id']['year']}-{res['_id']['month']:02d}-"
-                f"{res['_id']['day']:02d}T{res['_id']['hour']:02d}:00:00Z"
-            )
+        for r in results:
+            time_str = f"{r['_id']['h']:02d}:{r['_id']['minute']:02d}"
             formatted_data.append({
-                "timestamp": dt_str,
-                "total_traffic": res["total_traffic"],
-                "attacks": res["attacks"],
-                "normal": res["normal"],
+                "time": time_str,
+                "DoS": r["dos_count"],
+                "Port Scan": r["port_scan_count"],
+                "Normal": r["normal_count"]
             })
-
+            
         return formatted_data
 
-    except PyMongoError as e:
-        raise HTTPException(status_code=500, detail=f"MongoDB error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
