@@ -1,4 +1,7 @@
-print("--- 1. Starting Python ---", flush=True)
+
+import sys
+import os
+sys.path.append(os.path.dirname(__file__))
 from fastapi import FastAPI
 print("--- 2. Imported FastAPI ---", flush=True)
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +14,10 @@ print("--- 4. Imported DB ---", flush=True)
 from routers.dashboard import router as dashboard_router
 from routers.fim import router as fim_router
 from routers.network_logs import router as network_logs_router
-
+#----------------------------------------------------------------------
+from chatbotcore import parse_query, fetch_logs
+from pydantic import BaseModel
+#---------------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -41,6 +47,8 @@ app.include_router(dashboard_router)
 app.include_router(fim_router)
 app.include_router(network_logs_router)
 
+class ChatRequest(BaseModel):
+    query: str
 
 def find_duplicate_hostnames():
     collection = db["network_logs"]
@@ -98,3 +106,23 @@ async def worker():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+@app.post("/api/chatbot/query")
+async def chatbot_query(req: ChatRequest):
+    try:
+        filters, collection = parse_query(req.query)
+
+        results = fetch_logs(db, filters, collection)
+
+        return {
+            "success": True,
+            "filters": filters,
+            "count": len(results),
+            "results": results
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
