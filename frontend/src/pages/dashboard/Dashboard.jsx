@@ -336,18 +336,34 @@ export default function Dashboard() {
           <div>
             {recentAttacks.length === 0 ? (
               <div style={{ padding: "20px", textAlign: "center", color: COLORS.muted, fontSize: "11px" }}>No recent attacks detected.</div>
-            ) : recentAttacks.map((alert, i) => (
-              <div key={i} style={{ padding: "10px 16px", borderBottom: i < 4 ? `1px solid ${COLORS.border}` : "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontSize: "12px", color: COLORS.text, marginBottom: "2px" }}>{alert.src_ip} &rarr; {alert.dst_ip}</div>
-                  <div style={{ fontSize: "10px", color: COLORS.muted, fontFamily: "monospace" }}>{alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : "—"}</div>
+            ) : recentAttacks.map((alert, i) => {
+              // Check status to determine badge color
+              const isResolved = alert.status === "Resolved";
+              
+              return (
+                <div key={alert._id} style={{ padding: "10px 16px", borderBottom: i < recentAttacks.length - 1 ? `1px solid ${COLORS.border}` : "none", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: "12px", color: COLORS.text, marginBottom: "2px" }}>{alert.src_ip} &rarr; {alert.dst_ip}</div>
+                    <div style={{ fontSize: "10px", color: COLORS.muted, fontFamily: "monospace" }}>
+                      {alert.last_seen ? new Date(alert.last_seen).toLocaleTimeString() : "—"}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    
+                    {/* NEW: Status Badge instead of Severity */}
+                    <span style={{
+                      padding: "2px 6px", borderRadius: "4px", fontSize: "9px", fontWeight: "bold", textTransform: "uppercase",
+                      backgroundColor: isResolved ? "rgba(0, 255, 0, 0.1)" : "rgba(255, 0, 0, 0.1)",
+                      color: isResolved ? "#4ade80" : COLORS.red
+                    }}>
+                      {alert.status}
+                    </span>
+                    
+                    <AttackBadge attack={alert.attack_type} />
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                  <SeverityBadge severity={alert.severity} />
-                  <AttackBadge attack={alert.attack} />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
 

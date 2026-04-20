@@ -8,6 +8,7 @@ from database import db  # Use shared db, no separate client
 
 network_logs_col = db["network_logs"]
 predictions_col = db["predictions"]
+alerts_col = db["attack_alerts"]
 
 SEVERITY_MAP = {
     "DoS": "high",
@@ -81,6 +82,37 @@ def predict_log(log):
         }
 
         predictions_col.insert_one(record)
+
+        # ---> ADD THIS ALERTING BLOCK <---
+        # Only process if it's an attack AND the model is reasonably confident 
+        # (Change 0.50 to whatever threshold fits your model's false-positive rate)
+        if attack_type != "None" and confidence >= 0.50:
+            alerts_col.update_one(
+                {
+                    # The Aggregation Key
+                    "src_ip": log.get("src_ip"),
+                    "dst_ip": log.get("dst_ip", "unknown"),
+                    "attack_type": attack_type,
+                    "status": "Active"
+                },
+                {
+                    # Increment the count of how many times we've seen this attack
+                    "$inc": {"event_count": 1},
+                    # Update the last seen time
+                    "$set": {
+                        "last_seen": datetime.utcnow(),
+                        "severity": severity
+                    },
+                    # Only set these fields if this is the very first log triggering the alert
+                    "$setOnInsert": {
+                        "first_seen": datetime.utcnow(),
+                        "hostname": log.get("hostname"),
+                        "avg_confidence": round(confidence, 4) 
+                    }
+                },
+                upsert=True
+            )
+        # ---> END ALERTING BLOCK <---
 
         if log.get("_id") is not None:
             network_logs_col.update_one(

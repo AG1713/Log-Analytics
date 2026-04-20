@@ -1,4 +1,5 @@
 
+from datetime import datetime, timedelta
 import sys
 import os
 sys.path.append(os.path.dirname(__file__))
@@ -14,6 +15,7 @@ print("--- 4. Imported DB ---", flush=True)
 from routers.dashboard import router as dashboard_router
 from routers.fim import router as fim_router
 from routers.network_logs import router as network_logs_router
+from routers.attack_alerts import router as attack_alerts_router
 #----------------------------------------------------------------------
 from chatbotcore import parse_query, fetch_logs
 from pydantic import BaseModel
@@ -23,8 +25,10 @@ from pydantic import BaseModel
 async def lifespan(app: FastAPI):
     print("🚀 Starting background worker")
     task = asyncio.create_task(worker())
+    janitor_task = asyncio.create_task(alert_janitor())
     yield
     task.cancel()
+    janitor_task.cancel()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -46,6 +50,43 @@ app.add_middleware(
 app.include_router(dashboard_router)
 app.include_router(fim_router)
 app.include_router(network_logs_router)
+app.include_router(attack_alerts_router)  # <-- Include the attack_alerts router
+
+
+async def alert_janitor():
+    """Runs in the background to clean up stale alerts every 60 seconds."""
+    while True:
+        # Run your synchronous DB sweep function in a thread so it doesn't block FastAPI
+        await asyncio.to_thread(close_stale_alerts, idle_minutes=1)
+        await asyncio.sleep(60) # Wait 60 seconds before sweeping again
+
+
+def close_stale_alerts(idle_minutes=10):
+    """Marks alerts as Resolved if no new logs have been seen for `idle_minutes`."""
+    alerts_col = db["attack_alerts"]
+    
+    try:
+        stale_threshold = datetime.utcnow() - timedelta(minutes=idle_minutes)
+        
+        # Find all Ongoing alerts where last_seen is older than the threshold
+        result = alerts_col.update_many(
+            {
+                "status": "Active",
+                "last_seen": {"$lt": stale_threshold}
+            },
+            {
+                "$set": {
+                    "status": "Inactive",  # Close the alert
+                }
+            }
+        )
+        
+        if result.modified_count > 0:
+            print(f"🔒 Auto-resolved {result.modified_count} stale alerts.")
+            
+    except Exception as e:
+        print("❌ Error closing stale alerts:", e)
+
 
 class ChatRequest(BaseModel):
     query: str

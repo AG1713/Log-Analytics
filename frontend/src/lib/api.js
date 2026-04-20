@@ -52,4 +52,15 @@ export const api = {
     return new EventSource(`${BASE}/api/network/stream${params}`);
   },
 
+  // Attack Alerts
+  fetchAttackAlerts:          (params = {}) => {
+    // Cleans up undefined properties so URLSearchParams doesn't stringify them
+    const cleanParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v != null));
+    const query = new URLSearchParams(cleanParams).toString();
+    return get(`/api/attack_alerts${query ? `?${query}` : ""}`);
+  },
+  toggleAttackAlertStatus:    (id) => post(`/api/attack_alerts/${id}/toggle`, {}), 
+  deleteAttackAlert:          (id) => del(`/api/attack_alerts/${id}`), // Soft deletes an alert
+  clearAttackAlerts:          (hostname) => del(`/api/attack_alerts${hostname ? `?hostname=${hostname}` : ""}`),
+
 };

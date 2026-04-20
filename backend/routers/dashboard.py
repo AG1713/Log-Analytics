@@ -156,30 +156,13 @@ def traffic_timeline(hours: int = 6):
         
     # return formatted_data
 
-# You will also need two basic endpoints for the quick-triage lists:
 @router.get("/recent-attacks")
-def recent_attacks(limit: int = 5):
-    # docs = db.predictions.find({"attack": {"$ne": NORMAL_LABEL}}).sort("timestamp", -1).limit(limit)
-    # return list(docs) # Ensure _id and timestamps are serialized
-    # Generates safe, JSON-serializable dictionaries
-
-    # PLACEHOLDER: Do not remove unless you have real data to replace it with (the above commented code is not it).
-    # This is used to test the frontend display of recent attacks before we have real data flowing in.
-    now_iso = datetime.utcnow().isoformat()
-    attacks = []
-    
-    for i in range(limit):
-        is_dos = i % 2 == 0
-        attacks.append({
-            "_id": f"fake_attack_id_{i}",
-            "src_ip": f"192.168.1.{100 + i}",
-            "dst_ip": "10.0.0.5",
-            "timestamp": now_iso,
-            "severity": "high" if is_dos else "medium",
-            "attack": "DoS" if is_dos else "Port Scan"
-        })
-        
-    return attacks
+def recent_attacks(hostname = None, limit: int = 5):
+    query = {"is_archived": {"$ne": True}}
+    if hostname:
+        query["hostname"] = hostname
+    alerts = list(db.attack_alerts.find(query).sort("last_seen", -1).limit(limit))
+    return [serialize(a) for a in alerts]
 
 @router.get("/recent-fim")
 def recent_fim(hostname = None, limit: int = 5):

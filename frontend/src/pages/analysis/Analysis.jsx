@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from "../../lib/api";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
@@ -108,6 +108,119 @@ const ProtoBadge = ({ proto }) => {
     <span style={{ padding: "2px 6px", borderRadius: "3px", fontSize: "10px", background: s.bg, color: s.color, border: `1px solid ${s.border}`, textTransform: "uppercase" }}>
       {proto || "—"}
     </span>
+  );
+};
+
+// Helper to format timestamps nicely
+const formatDate = (dateString) => {
+  if (!dateString) return "N/A";
+  return new Date(dateString).toLocaleString(undefined, { 
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' 
+  });
+};
+
+const AlertsTable = () => {
+  const queryClient = useQueryClient();
+
+  // 1. Fetch Alerts
+  const { data: alerts = [], isLoading, isError, refetch, isFetching } = useQuery({
+    queryKey: ['attack_alerts'],
+    queryFn: () => api.fetchAttackAlerts(), // Fetches unarchived by default
+  });
+
+  // 2. Toggle Status Mutation
+  const toggleMutation = useMutation({
+    mutationFn: (id) => api.toggleAttackAlertStatus(id),
+    onSuccess: () => {
+      // Instantly refetch the alerts to show the updated status
+      queryClient.invalidateQueries({ queryKey: ['attack_alerts'] });
+    }
+  });
+
+  // 3. Delete Alert Mutation
+  const deleteMutation = useMutation({
+    mutationFn: (id) => api.deleteAttackAlert(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['attack_alerts'] });
+    }
+  });
+
+  if (isLoading) return <div style={{ padding: "40px", textAlign: "center", color: COLORS.muted }}>Loading alerts...</div>;
+  if (isError) return <div style={{ padding: "40px", textAlign: "center", color: COLORS.red }}>Error loading alerts.</div>;
+  if (alerts.length === 0) return <div style={{ padding: "40px", textAlign: "center", color: COLORS.muted }}>No active alerts found.</div>;
+
+  return (
+    <div style={{ width: "100%", overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", textAlign: "left" }}>
+        <thead>
+          <tr style={{ borderBottom: `1px solid ${COLORS.border}`, color: COLORS.muted }}>
+            <th style={{ padding: "12px 16px", fontWeight: 500 }}>SEVERITY</th>
+            <th style={{ padding: "12px 16px", fontWeight: 500 }}>TYPE</th>
+            <th style={{ padding: "12px 16px", fontWeight: 500 }}>SOURCE IP</th>
+            <th style={{ padding: "12px 16px", fontWeight: 500 }}>TARGET IP</th>
+            <th style={{ padding: "12px 16px", fontWeight: 500 }}>COUNT</th>
+            <th style={{ padding: "12px 16px", fontWeight: 500 }}>CONFIDENCE</th>
+            <th style={{ padding: "12px 16px", fontWeight: 500 }}>LAST SEEN</th>
+            <th style={{ padding: "12px 16px", fontWeight: 500 }}>STATUS</th>
+            <th style={{ padding: "12px 16px", fontWeight: 500, textAlign: "right" }}>ACTIONS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {alerts.map((alert) => {
+            const isResolved = alert.status === "Resolved";
+            return (
+              <tr key={alert._id} style={{ borderBottom: `1px solid ${COLORS.border}`, opacity: isResolved ? 0.6 : 1 }}>
+                <td style={{ padding: "12px 16px" }}>
+                  <span style={{
+                    color: alert.severity === "high" ? COLORS.red : alert.severity === "medium" ? COLORS.orange : COLORS.cyan,
+                    textTransform: "uppercase", fontWeight: "bold"
+                  }}>
+                    {alert.severity}
+                  </span>
+                </td>
+                <td style={{ padding: "12px 16px", color: COLORS.text }}>{alert.attack_type}</td>
+                <td style={{ padding: "12px 16px", fontFamily: "monospace", color: COLORS.muted }}>{alert.src_ip}</td>
+                <td style={{ padding: "12px 16px", fontFamily: "monospace", color: COLORS.muted }}>{alert.dst_ip}</td>
+                <td style={{ padding: "12px 16px", color: COLORS.text }}>{alert.event_count}</td>
+                <td style={{ padding: "12px 16px", color: COLORS.text }}>{(alert.avg_confidence * 100).toFixed(1)}%</td>
+                <td style={{ padding: "12px 16px", color: COLORS.muted }}>{formatDate(alert.last_seen)}</td>
+                <td style={{ padding: "12px 16px" }}>
+                  <span style={{
+                    padding: "2px 8px", borderRadius: "4px", fontSize: "10px", fontWeight: "bold", textTransform: "uppercase",
+                    backgroundColor: isResolved ? "rgba(0, 255, 0, 0.1)" : "rgba(255, 0, 0, 0.1)",
+                    color: isResolved ? "#4ade80" : COLORS.red
+                  }}>
+                    {alert.status}
+                  </span>
+                </td>
+                <td style={{ padding: "12px 16px", textAlign: "right" }}>
+                  <button 
+                    onClick={() => toggleMutation.mutate(alert._id)}
+                    disabled={toggleMutation.isPending}
+                    style={{
+                      background: "transparent", border: `1px solid ${COLORS.border}`, color: COLORS.text,
+                      padding: "4px 8px", borderRadius: "4px", cursor: "pointer", marginRight: "8px", fontSize: "11px"
+                    }}
+                  >
+                    {isResolved ? "Reopen" : "Resolve"}
+                  </button>
+                  <button 
+                    onClick={() => deleteMutation.mutate(alert._id)}
+                    disabled={deleteMutation.isPending}
+                    style={{
+                      background: "transparent", border: `1px solid ${COLORS.red}`, color: COLORS.red,
+                      padding: "4px 8px", borderRadius: "4px", cursor: "pointer", fontSize: "11px"
+                    }}
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 };
 
@@ -279,15 +392,35 @@ export default function Analysis() {
       </div>
 
       {/* Tab Content: ALERTS (Placeholder) */}
+      {/* Tab Content: ALERTS */}
       {activeTab === "alerts" && (
         <Card noPadding style={{ minHeight: "300px" }}>
-          <div style={{ padding: "16px", borderBottom: `1px solid ${COLORS.border}` }}>
+          
+          {/* Header with Refresh Button */}
+          <div style={{ 
+            padding: "16px", 
+            borderBottom: `1px solid ${COLORS.border}`,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center"
+          }}>
             <CardLabel style={{ margin: 0 }}>ACTIVE THREAT INVESTIGATIONS</CardLabel>
+            
+            <button 
+              // We grab the queryClient to trigger a manual refetch
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['attack_alerts'] })}
+              style={{
+                background: COLORS.background, border: `1px solid ${COLORS.border}`, color: COLORS.cyan,
+                padding: "4px 12px", borderRadius: "4px", cursor: "pointer", fontSize: "11px", fontWeight: "bold"
+              }}
+            >
+              REFRESH
+            </button>
           </div>
-          <div style={{ padding: "40px", textAlign: "center", color: COLORS.muted }}>
-            <div style={{ fontSize: "14px", marginBottom: "8px" }}>Alert Engine Not Yet Connected</div>
-            <div style={{ fontSize: "11px" }}>Grouped incidents will appear here once the alert correlation logic is implemented.</div>
-          </div>
+
+          {/* The Data Table */}
+          <AlertsTable />
+          
         </Card>
       )}
 
