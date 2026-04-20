@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
@@ -114,9 +114,8 @@ const ProtoBadge = ({ proto }) => {
 // --- Main Component ---
 export default function Analysis() {
   const [activeTab, setActiveTab] = useState("alerts"); // 'alerts' or 'predictions'
-  // Live Streaming State
-  const [predictionLogs, setPredictionLogs] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState(null);
+  const queryClient = useQueryClient();
 
   // Fetch Summary for KPIs and Pie Chart
   const { data: summary, isLoading: loadingSummary } = useQuery({
@@ -132,30 +131,37 @@ export default function Analysis() {
     refetchInterval: 30000,
   });
 
-  useEffect(() => {
-    if (activeTab !== "predictions") {
-      setPredictionLogs([]);
-      return;
-    }
+  const { data: predictionLogs = [], isLoading: isPredictionsLoading } = useQuery({
+    queryKey: ["predictionLogs", selectedDevice],
+    queryFn: () => api.fetchPredictions(50),
+    enabled: activeTab === "predictions",
+    staleTime: Infinity, 
+  });
 
-    setPredictionLogs([]);
-    
+  useEffect(() => {
+    if (activeTab !== "predictions") return;
+
     const es = api.streamPredictions(selectedDevice);
 
     es.onmessage = (e) => {
       try {
         const incoming = JSON.parse(e.data);
-        if (!Array.isArray(incoming) || incoming.error) return;
-        setPredictionLogs(prev => {
-          const existingIds = new Set(prev.map(l => l._id));
+        if (incoming.error || !Array.isArray(incoming)) return;
+
+        // Update the React Query cache directly
+        queryClient.setQueryData(["predictionLogs", selectedDevice], (oldData = []) => {
+          const existingIds = new Set(oldData.map(l => l._id));
           const newOnly = incoming.filter(l => !existingIds.has(l._id));
-          return [...newOnly, ...prev].slice(0, 100);
+          return [...newOnly, ...oldData].slice(0, 100);
         });
-      } catch {}
+      } catch (err) {
+        console.error("SSE Parse Error:", err);
+      }
     };
+
     es.onerror = () => es.close();
     return () => es.close();
-  }, [activeTab, selectedDevice]);
+  }, [activeTab, selectedDevice, queryClient]);
 
   if (loadingSummary || !summary) return (
     <div style={{ background: COLORS.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontFamily: "monospace", fontSize: "13px" }}>

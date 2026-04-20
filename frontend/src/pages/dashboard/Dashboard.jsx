@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
@@ -120,8 +120,8 @@ const ProtoBadge = ({ proto }) => {
 // --- Main Component ---
 export default function Dashboard() {
   const [showNetworkLogs, setShowNetworkLogs] = useState(false);
-  const [networkLogs, setNetworkLogs]         = useState([]);
   const [selectedDevice, setSelectedDevice]   = useState(null);
+  const queryClient = useQueryClient();
 
   // Core metrics (updated to include IPs, DoS, Port Scans)
   const { data: summary, isLoading, isError, error } = useQuery({
@@ -156,77 +156,42 @@ export default function Dashboard() {
     queryFn:   api.fetchDevices,
     staleTime: 30000,
   });
+
+  const { data: networkLogs = [], isLoading: isNetworkLoading } = useQuery({
+    queryKey: ["networkLogs", selectedDevice],
+    queryFn: () => api.fetchNetworkLogs(50), 
+    enabled: showNetworkLogs,
+    // CRITICAL: Prevent React Query from auto-refetching in the background 
+    // since our SSE stream is going to manually maintain the freshness.
+    staleTime: Infinity, 
+  });
+
   const devices = devicesData?.devices || [];
 
-  // Initial load for live table
-  // const { data: initialLogs = [] } = useQuery({
-  //   queryKey: ["networkLogs"],
-  //   queryFn:  () => api.fetchNetworkLogs(50),
-  //   enabled:  showNetworkLogs,
-  //   staleTime: 0,
-  // });
-
-  // useEffect(() => {
-  //   if (initialLogs.length > 0 && networkLogs.length === 0) {
-  //     setNetworkLogs(initialLogs);
-  //   }
-  // }, [initialLogs]);
-
-  // SSE for live network logs
-  // useEffect(() => {
-  //   if (!showNetworkLogs) {
-  //     setNetworkLogs([]);
-  //     return;
-  //   }
-
-  //   setNetworkLogs([]);
-  //   const es = api.streamNetworkLogs(selectedDevice);
-
-  //   es.onmessage = (e) => {
-  //     try {
-  //       const incoming = JSON.parse(e.data);
-  //       if (!Array.isArray(incoming) || incoming.error) return;
-  //       setNetworkLogs(prev => {
-  //         const existingIds = new Set(prev.map(l => l._id));
-  //         const newOnly = incoming.filter(l => !existingIds.has(l._id));
-  //         return [...newOnly, ...prev].slice(0, 100);
-  //       });
-  //     } catch {}
-  //   };
-  //   es.onerror = () => es.close();
-  //   return () => es.close();
-  // }, [showNetworkLogs, selectedDevice]);\
-
   useEffect(() => {
-    if (!showNetworkLogs) {
-      setNetworkLogs([]);
-      return;
-    }
+    if (!showNetworkLogs) return;
 
-    // 1. Fetch a fresh snapshot immediately so the table isn't empty
-    api.fetchNetworkLogs(50)
-      .then(logs => setNetworkLogs(logs))
-      .catch(() => setNetworkLogs([]));
-
-    // 2. Open the live stream to append new logs
     const es = api.streamNetworkLogs(selectedDevice);
 
     es.onmessage = (e) => {
       try {
         const incoming = JSON.parse(e.data);
-        if (!Array.isArray(incoming) || incoming.error) return;
-        setNetworkLogs(prev => {
-          const existingIds = new Set(prev.map(l => l._id));
+        if (incoming.error || !Array.isArray(incoming)) return;
+
+        // Update the React Query cache directly
+        queryClient.setQueryData(["networkLogs", selectedDevice], (oldData = []) => {
+          const existingIds = new Set(oldData.map(l => l._id));
           const newOnly = incoming.filter(l => !existingIds.has(l._id));
-          return [...newOnly, ...prev].slice(0, 100);
+          return [...newOnly, ...oldData].slice(0, 100);
         });
-      } catch {}
+      } catch (err) {
+        console.error("SSE Parse Error:", err);
+      }
     };
 
     es.onerror = () => es.close();
-    
     return () => es.close();
-  }, [showNetworkLogs, selectedDevice]);
+  }, [showNetworkLogs, selectedDevice, queryClient]);
 
   if (isLoading || !summary) return (
     <div style={{ background: COLORS.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontFamily: "monospace", fontSize: "13px" }}>

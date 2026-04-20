@@ -71,49 +71,45 @@ def get_network_logs(limit: int = 50):
 
 
 @router.get("/network/stream")
-async def stream_network(request: Request, hostname: str = None):
+async def stream_network_logs(request: Request, hostname: str = Query(default=None)):
     """Streams live raw network logs via Server-Sent Events (SSE)."""
-    
-    async def log_generator():
-        try:
-            # 1. Find the latest document ID so we only stream NEW logs from this point forward
-            latest_log = db.network_logs.find_one(sort=[("_id", -1)])
-            last_id = latest_log["_id"] if latest_log else ObjectId("000000000000000000000000")
+    async def event_generator():
+        # 1. Initialize cursor at the "head" of the collection
+        latest_doc = db.network_logs.find_one(sort=[("timestamp", -1)])
+        last_time = latest_doc["timestamp"] if latest_doc else datetime.min
 
-            while True:
-                # 2. Break the loop if the user navigates away or toggles the stream off
-                if await request.is_disconnected():
-                    break
+        while True:
+            if await request.is_disconnected():
+                break
 
-                # 3. Build query for logs newer than our last seen ID
-                query = {"_id": {"$gt": last_id}}
+            try:
+                # 2. Query only for documents newer than our last seen ID
+                query = {"timestamp": {"$gte": last_time}}
                 if hostname:
                     query["hostname"] = hostname
 
-                # Fetch new logs in chronological order
-                new_docs = list(db.network_logs.find(query).sort("_id", 1))
+                # 3. Fetch in ascending order (oldest to newest)
+                new_docs = list(db.network_logs.find(query).sort([("timestamp", 1), ("_id", 1)]))
 
                 if new_docs:
-                    # Update our tracker to the newest ID
-                    last_id = new_docs[-1]["_id"]
-                    
-                    # Format for frontend (fix the ObjectId serialization)
-                    formatted_docs = []
-                    for doc in new_docs:
-                        doc["_id"] = str(doc["_id"])
-                        formatted_docs.append(doc)
+                    last_time = new_docs[-1]["timestamp"]
+                    payload = [serialize(doc) for doc in new_docs]
+                    yield f"data: {json.dumps(payload)}\n\n"
 
-                    # 4. Yield the SSE formatted string (must start with 'data: ' and end with '\n\n')
-                    yield f"data: {json.dumps(formatted_docs)}\n\n"
+                await asyncio.sleep(3)
 
-                # 5. Pause for 1 second before checking again to prevent CPU spam
-                await asyncio.sleep(1)
-                
-        except Exception as e:
-            # Send an error event to the frontend if something crashes
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                await asyncio.sleep(5) # Backoff on error
 
-    return StreamingResponse(log_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/predictions/logs")
@@ -125,36 +121,35 @@ def get_logs(limit: int = 50):
         raise HTTPException(status_code=500, detail=f"MongoDB error: {str(e)}")
 
 @router.get("/predictions/stream")
-async def stream_network_logs(request: Request, hostname: str = Query(default=None)):
+async def stream_predictions(request: Request, hostname: str = Query(default=None)):
+    """Streams live prediction logs via Server-Sent Events (SSE)."""
     async def event_generator():
-        last_id = None
+        latest_doc = db.predictions.find_one(sort=[("timestamp", -1)])
+        last_time = latest_doc["timestamp"] if latest_doc else datetime.min
 
         while True:
-            # Fix: detect client disconnect and stop the loop
             if await request.is_disconnected():
                 break
 
             try:
-                query = {}
+                # 2. Query only for documents newer than our last seen ID
+                query = {"timestamp": {"$gte": last_time}}
                 if hostname:
                     query["hostname"] = hostname
-                if last_id:
-                    query["_id"] = {"$gt": last_id}
 
-                logs = list(
-                    db.predictions.find(query).sort("timestamp", -1).limit(20)
-                )
+                # 3. Fetch in ascending order (oldest to newest)
+                new_docs = list(db.predictions.find(query).sort([("timestamp", 1), ("_id", 1)]))
 
-                if logs:
-                    last_id = logs[-1]["_id"]
-                    payload = [serialize(log) for log in logs]
+                if new_docs:
+                    last_time = new_docs[-1]["timestamp"]
+                    payload = [serialize(doc) for doc in new_docs]
                     yield f"data: {json.dumps(payload)}\n\n"
 
                 await asyncio.sleep(3)
 
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
-                await asyncio.sleep(5)
+                await asyncio.sleep(5) # Backoff on error
 
     return StreamingResponse(
         event_generator(),
