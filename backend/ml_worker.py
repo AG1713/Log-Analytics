@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 os.environ["LOKY_MAX_CPU_COUNT"] = "4"
 
@@ -43,7 +43,7 @@ def predict_log(log):
                             "anomaly": False,
                             "severity": "low",
                             "processed": True,
-                            "processed_at": datetime.utcnow(),
+                            "processed_at": datetime.now(timezone.utc),
                         }
                     },
                 )
@@ -58,7 +58,7 @@ def predict_log(log):
 
         record = {
             "raw_log_id": log.get("_id"),
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "hostname": log.get("hostname"),
             "prediction": prediction,
             "attack": prediction,
@@ -83,9 +83,6 @@ def predict_log(log):
 
         predictions_col.insert_one(record)
 
-        # ---> ADD THIS ALERTING BLOCK <---
-        # Only process if it's an attack AND the model is reasonably confident 
-        # (Change 0.50 to whatever threshold fits your model's false-positive rate)
         if attack_type != "None" and confidence >= 0.50:
             alerts_col.update_one(
                 {
@@ -100,19 +97,18 @@ def predict_log(log):
                     "$inc": {"event_count": 1},
                     # Update the last seen time
                     "$set": {
-                        "last_seen": datetime.utcnow(),
+                        "last_seen": datetime.now(timezone.utc),
                         "severity": severity
                     },
                     # Only set these fields if this is the very first log triggering the alert
                     "$setOnInsert": {
-                        "first_seen": datetime.utcnow(),
+                        "first_seen": datetime.now(timezone.utc),
                         "hostname": log.get("hostname"),
                         "avg_confidence": round(confidence, 4) 
                     }
                 },
                 upsert=True
             )
-        # ---> END ALERTING BLOCK <---
 
         if log.get("_id") is not None:
             network_logs_col.update_one(
@@ -121,7 +117,7 @@ def predict_log(log):
                     "$set": {
                         # ONLY update the state flags
                         "processed": True,
-                        "processed_at": datetime.utcnow(),
+                        "processed_at": datetime.now(timezone.utc),
                     }
                 },
             )
@@ -139,7 +135,7 @@ def predict_log(log):
                 {
                     "$set": {
                         "processed": True,
-                        "processed_at": datetime.utcnow(),
+                        "processed_at": datetime.now(timezone.utc),
                         "ml_error": str(e),
                     }
                 },
