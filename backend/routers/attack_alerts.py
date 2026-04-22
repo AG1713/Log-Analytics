@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 from database import db
 from routers.network_logs import serialize
@@ -21,7 +21,7 @@ def get_alerts(
 ):
     """Fetch alerts, optionally filtered by status (e.g., 'Inactive', 'Resolved')."""
     query = {}
-
+    query["event_count"] = {"$gt": 10}
     if not include_archived:
         query["is_archived"] = {"$ne": True}
 
@@ -35,7 +35,7 @@ def get_alerts(
     return alerts
 
 @router.post("/{alert_id}/toggle")
-def toggle_alert_status(alert_id: str):
+def toggle_alert_status(alert_id: str, idle_minutes: int = 1):
     """Toggles the alert status between 'Inactive' and 'Resolved'."""
     if not ObjectId.is_valid(alert_id):
         raise HTTPException(status_code=400, detail="Invalid Alert ID")
@@ -47,10 +47,16 @@ def toggle_alert_status(alert_id: str):
 
     # Determine new status
     current_status = alert.get("status", "Inactive")
+    last_seen = alert.get("last_seen", datetime.now(timezone.utc))
+    stale_threshold = datetime.utcnow() - timedelta(minutes=idle_minutes)
     
     if current_status == "Resolved":
-        new_status = "Inactive"
-        resolved_at = None
+        if last_seen < stale_threshold:
+            new_status = "Inactive"
+            resolved_at = None
+        else:
+            new_status = "Active"
+            resolved_at = None
     else:
         new_status = "Resolved"
         resolved_at = datetime.now(timezone.utc)

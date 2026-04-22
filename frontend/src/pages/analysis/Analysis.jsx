@@ -315,21 +315,21 @@ export default function Analysis() {
         {/* Attack Distribution Donut */}
         <Card>
           <CardLabel>ATTACK SIGNATURES</CardLabel>
-          <ResponsiveContainer width="100%" height={210} debounce={300}>
-            {attackDistData.length > 0 ? (
-              <PieChart>
-                <Pie data={attackDistData} cx="50%" cy="50%" innerRadius={60} outerRadius={85} paddingAngle={2} dataKey="value">
-                  {attackDistData.map((e, i) => <Cell key={i} fill={e.color} stroke="transparent" />)}
-                </Pie>
-                <Tooltip {...tooltipStyle} cursor={false} />
-              </PieChart>
-            ) : (
-              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontSize: "11px" }}>
-                No attacks recorded.
-              </div>
-            )}
-          </ResponsiveContainer>
-          
+          {attackDistData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={210} debounce={300}>
+                <PieChart>
+                  <Pie data={attackDistData} cx="50%" cy="50%" innerRadius={60} outerRadius={85} paddingAngle={2} dataKey="value">
+                    {attackDistData.map((e, i) => <Cell key={i} fill={e.color} stroke="transparent" />)}
+                  </Pie>
+                  <Tooltip {...tooltipStyle} cursor={false} />
+                </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontSize: "11px" }}>
+              No attacks recorded.
+            </div>
+          )}
+
           {/* Custom Legend underneath the Pie Chart */}
           <div style={{ display: "flex", justifyContent: "space-around", marginTop: "4px" }}>
             {attackDistData.map(item => (
@@ -349,21 +349,21 @@ export default function Analysis() {
         {/* Attack Timeline */}
         <Card>
           <CardLabel>THREAT TIMELINE (LAST 6H)</CardLabel>
-          <ResponsiveContainer width="100%" height={235} debounce={300}>
-            {timelineData.length > 0 ? (
-              <LineChart data={timelineData}>
-                <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
-                <XAxis dataKey="time" tick={{ fontSize: 9, fill: COLORS.muted }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-                <Tooltip {...tooltipStyle} />
-                <Legend wrapperStyle={{ fontSize: "10px", color: COLORS.muted }} />
-                <Line type="monotone" dataKey="DoS" stroke={ATTACK_COLORS.DoS} dot={false} strokeWidth={2} />
-                <Line type="monotone" dataKey="Port Scan" stroke={ATTACK_COLORS["Port Scan"]} dot={false} strokeWidth={2} />
-              </LineChart>
-            ) : (
-              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontSize: "11px" }}>Aggregating prediction data...</div>
-            )}
-          </ResponsiveContainer>
+          {timelineData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={235} debounce={300}>
+                <LineChart data={timelineData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
+                  <XAxis dataKey="time" tick={{ fontSize: 9, fill: COLORS.muted }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                  <YAxis tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
+                  <Tooltip {...tooltipStyle} />
+                  <Legend wrapperStyle={{ fontSize: "10px", color: COLORS.muted }} />
+                  <Line type="monotone" dataKey="DoS" stroke={ATTACK_COLORS.DoS} dot={false} strokeWidth={2} />
+                  <Line type="monotone" dataKey="Port Scan" stroke={ATTACK_COLORS["Port Scan"]} dot={false} strokeWidth={2} />
+                </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontSize: "11px" }}>Aggregating prediction data...</div>
+          )}
         </Card>
       </div>
 

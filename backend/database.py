@@ -14,4 +14,4 @@ except PyMongoError as e:
 
 db = client.siem_db
 config_db = client.siem_config
-fim_db = client.fim_integritydata
+fim_db = client.fim_integrity

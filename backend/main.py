@@ -41,6 +41,7 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://172.17.0.4:5173",
         "http://172.17.0.1:5173"
+        "http://localhost:5173/fim",
     ],
     allow_credentials=True,   # Added
     allow_methods=["*"],

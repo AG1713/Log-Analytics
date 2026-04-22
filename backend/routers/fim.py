@@ -3,7 +3,7 @@ from datetime import datetime
 from email.mime.text import MIMEText
 
 from bson import ObjectId
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, HTTPException
 
 from database import db, config_db, fim_db
 
@@ -55,30 +55,54 @@ async def get_config(hostname: str = Query(default=None)):
         query["hostname"] = hostname
     doc = config_db.settings.find_one(query)
     if not doc:
-        return {"paths": ["/etc/nginx", "/var/www/html"]}
+        return {"paths": []}
     return {"paths": doc["paths"]}
-
 
 @router.post("/add_path")
 async def add_path(request: Request):
-    data = await request.json()
+    # 1. Catch JSON parsing errors
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    print(data)
     new_path = data.get("path")
     hostname = data.get("hostname")
 
     if not new_path:
-        return {"status": "error", "message": "No path provided"}
+        # Use proper HTTP error codes instead of a 200 OK with an "error" string
+        raise HTTPException(status_code=400, detail="No path provided")
 
     query = {"type": "watch_config"}
     if hostname:
         query["hostname"] = hostname
 
-    config_db.settings.update_one(
-        query,
-        {"$addToSet": {"paths": new_path}},
-        upsert=True,
-    )
-    print(f"[*] New path added to monitoring: {new_path}")
-    return {"status": "success", "added": new_path}
+    # 2. Wrap DB operations in a try/except block
+    try:
+        result = config_db.settings.update_one(
+            query,
+            {"$addToSet": {"paths": new_path}},
+            upsert=True,
+        )
+        
+        # 3. Check what the database actually did
+        if result.modified_count > 0:
+            print(f"[*] New path added to existing document: {new_path}")
+            return {"status": "success", "added": new_path}
+            
+        elif result.upserted_id:
+            print(f"[*] Created new document and added path: {new_path}")
+            return {"status": "success", "added": new_path, "upserted": True}
+            
+        else:
+            # If it didn't modify or upsert, $addToSet found a duplicate.
+            print(f"[*] Ignored: Path '{new_path}' is already in the array.")
+            return {"status": "success", "message": "Path already exists"}
+
+    except Exception as e:
+        # 4. Catch and log the actual database error
+        print(f"[!] Database operation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal database error")
 
 
 @router.delete("/config/path")

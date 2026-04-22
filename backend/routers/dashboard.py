@@ -26,7 +26,7 @@ def attack_summary():
         # Assuming your label might be "Reconnaissance" or "Port Scan"
         port_scan_count = db.predictions.count_documents({"attack_type": {"$in": ["Port Scan", "Reconnaissance"]}})
 
-        proto_data = db.predictions.aggregate([
+        proto_data = db.network_logs.aggregate([
             {"$group": {"_id": "$proto", "count": {"$sum": 1}}}
         ])
         protocol_distribution = {
@@ -34,7 +34,7 @@ def attack_summary():
             for item in proto_data
         }
 
-        service_data = db.predictions.aggregate([
+        service_data = db.network_logs.aggregate([
             {"$group": {"_id": "$service", "count": {"$sum": 1}}}
         ])
         service_distribution = {
@@ -159,6 +159,7 @@ def traffic_timeline(hours: int = 6):
 @router.get("/recent-attacks")
 def recent_attacks(hostname = None, limit: int = 5):
     query = {"is_archived": {"$ne": True}}
+    query["event_count"] = {"$gt": 10}
     if hostname:
         query["hostname"] = hostname
     alerts = list(db.attack_alerts.find(query).sort("last_seen", -1).limit(limit))

@@ -271,8 +271,8 @@ export default function Dashboard() {
         {/* Traffic Volume vs Time */}
         <Card>
           <CardLabel>TRAFFIC VOLUME VS TIME (LAST 6H)</CardLabel>
-          <ResponsiveContainer width="100%" height={210} debounce={300}>
-            {trafficData.length > 0 ? (
+          {trafficData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={210} debounce={300}>
               <LineChart data={trafficData}>
                 <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
                 <XAxis dataKey="time" tick={{ fontSize: 9, fill: COLORS.muted }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
@@ -280,41 +280,53 @@ export default function Dashboard() {
                 <Tooltip {...tooltipStyle} />
                 <Line type="monotone" dataKey="traffic" stroke={COLORS.cyan} dot={false} strokeWidth={2} name="Volume" />
               </LineChart>
-            ) : (
-              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontSize: "11px" }}>
-                Aggregating network data...
-              </div>
-            )}
-          </ResponsiveContainer>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{ height: 210, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontSize: "11px" }}>
+              Aggregating network data...
+            </div>
+          )}
         </Card>
         
         <Card style={{ display: "flex", flexDirection: "column" }}>
           <CardLabel>LOGS BY PROTOCOL</CardLabel>
           <div style={{ flex: 1, minHeight: 0 }}>
-            <ResponsiveContainer width="100%" height="100%" debounce={300}>
-              <BarChart data={protocolData} layout="vertical" barSize={12}>
-                <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} width={36} />
-                <Tooltip {...tooltipStyle} />
-                <Bar dataKey="value" name="Count" fill={COLORS.blue} radius={[0, 3, 3, 0]} opacity={0.85} />
-              </BarChart>
-            </ResponsiveContainer>
+            {protocolData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%" debounce={300}>
+                <BarChart data={protocolData} layout="vertical" barSize={12}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal={false} />
+                  <XAxis type="number" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} width={36} />
+                  <Tooltip {...tooltipStyle} />
+                  <Bar dataKey="value" name="Count" fill={COLORS.blue} radius={[0, 3, 3, 0]} opacity={0.85} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div style={{ height: "100%", width: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontSize: "11px" }}>
+                Aggregating protocol data...
+              </div>
+            )}
           </div>
         </Card>
 
         <Card style={{ display: "flex", flexDirection: "column" }}>
           <CardLabel>LOGS BY SERVICE</CardLabel>
           <div style={{ flex: 1, minHeight: 0 }}>
-            <ResponsiveContainer width="100%" height="100%" debounce={300}>
-              <BarChart data={serviceData} layout="vertical" barSize={12}>
-                <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} width={40} />
-                <Tooltip {...tooltipStyle} />
-                <Bar dataKey="value" name="Count" fill={COLORS.purple} radius={[0, 3, 3, 0]} opacity={0.85} />
-              </BarChart>
-            </ResponsiveContainer>
+            {serviceData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%" debounce={300}>
+                <BarChart data={serviceData} layout="vertical" barSize={12}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} horizontal={false} />
+                  <XAxis type="number" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: COLORS.muted }} axisLine={false} tickLine={false} width={40} />
+                  <Tooltip {...tooltipStyle} />
+                  <Bar dataKey="value" name="Count" fill={COLORS.purple} radius={[0, 3, 3, 0]} opacity={0.85} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div style={{ height: "100%", width: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.muted, fontSize: "11px" }}>
+                Aggregating service data...
+              </div>
+            )}
           </div>
         </Card>
 
