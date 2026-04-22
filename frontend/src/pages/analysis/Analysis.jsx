@@ -119,13 +119,19 @@ const formatDate = (dateString) => {
   });
 };
 
-const AlertsTable = () => {
+// Make sure to pass selectedDevice as a prop from your parent component!
+const AlertsTable = ({ selectedDevice }) => {
   const queryClient = useQueryClient();
 
   // 1. Fetch Alerts
   const { data: alerts = [], isLoading, isError, refetch, isFetching } = useQuery({
-    queryKey: ['attack_alerts'],
-    queryFn: () => api.fetchAttackAlerts(), // Fetches unarchived by default
+    // Add selectedDevice to the queryKey so it refetches when the tab changes
+    queryKey: ['attack_alerts', selectedDevice], 
+    queryFn: () => api.fetchAttackAlerts({
+      // Because your cleanParams logic is so good, if selectedDevice is null ("All"), 
+      // it just gets ignored!
+      hostname: selectedDevice 
+    }), 
   });
 
   // 2. Toggle Status Mutation
@@ -133,6 +139,7 @@ const AlertsTable = () => {
     mutationFn: (id) => api.toggleAttackAlertStatus(id),
     onSuccess: () => {
       // Instantly refetch the alerts to show the updated status
+      // (This invalidates all queries starting with 'attack_alerts', including the filtered ones)
       queryClient.invalidateQueries({ queryKey: ['attack_alerts'] });
     }
   });
@@ -212,7 +219,7 @@ const AlertsTable = () => {
                       padding: "4px 8px", borderRadius: "4px", cursor: "pointer", fontSize: "11px"
                     }}
                   >
-                    Delete
+                    {deleteMutation.isPending ? "..." : "Delete"}
                   </button>
                 </td>
               </tr>
@@ -244,9 +251,16 @@ export default function Analysis() {
     refetchInterval: 30000,
   });
 
+  const { data: fetchedDevices } = useQuery({
+    queryKey: ["devices"],
+    queryFn: () => api.fetchDevices(),
+  });
+  const deviceList = Array.isArray(fetchedDevices) ? fetchedDevices : (fetchedDevices?.devices || []);
+
   const { data: predictionLogs = [], isLoading: isPredictionsLoading } = useQuery({
     queryKey: ["predictionLogs", selectedDevice],
-    queryFn: () => api.fetchPredictions(50),
+    // Pass selectedDevice (or null if it represents "All")
+    queryFn: () => api.fetchPredictions(50, selectedDevice === "All" ? null : selectedDevice),
     enabled: activeTab === "predictions",
     staleTime: Infinity, 
   });
@@ -254,7 +268,7 @@ export default function Analysis() {
   useEffect(() => {
     if (activeTab !== "predictions") return;
 
-    const es = api.streamPredictions(selectedDevice);
+    const es = api.streamPredictions(selectedDevice === "All" ? null : selectedDevice);
 
     es.onmessage = (e) => {
       try {
@@ -391,7 +405,6 @@ export default function Analysis() {
         </button>
       </div>
 
-      {/* Tab Content: ALERTS (Placeholder) */}
       {/* Tab Content: ALERTS */}
       {activeTab === "alerts" && (
         <Card noPadding style={{ minHeight: "300px" }}>
@@ -404,13 +417,53 @@ export default function Analysis() {
             justifyContent: "space-between",
             alignItems: "center"
           }}>
-            <CardLabel style={{ margin: 0 }}>ACTIVE THREAT INVESTIGATIONS</CardLabel>
             
+            {/* LEFT SIDE: Title + Hostname Toggle */}
+            <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+              <CardLabel style={{ margin: 0 }}>ACTIVE THREAT INVESTIGATIONS</CardLabel>
+              
+              <div style={{ display: "flex", background: "#080f1a", borderRadius: "4px", overflow: "hidden", border: `1px solid ${COLORS.border}` }}>
+                <button
+                  onClick={() => setSelectedDevice(null)}
+                  style={{ 
+                    padding: "4px 12px", 
+                    background: !selectedDevice ? COLORS.cyan : "transparent", 
+                    color: !selectedDevice ? "#000" : COLORS.muted, 
+                    border: "none", 
+                    fontSize: "11px", 
+                    cursor: "pointer",
+                    fontWeight: !selectedDevice ? "bold" : "normal"
+                  }}
+                >
+                  All
+                </button>
+                
+                {deviceList.map((device) => (
+                  <button
+                    key={device}
+                    onClick={() => setSelectedDevice(device)}
+                    style={{ 
+                      padding: "4px 12px", 
+                      background: selectedDevice === device ? COLORS.cyan : "transparent", 
+                      color: selectedDevice === device ? "#000" : COLORS.muted, 
+                      border: "none",
+                      borderLeft: `1px solid ${COLORS.border}`,
+                      fontSize: "11px", 
+                      cursor: "pointer",
+                      fontWeight: selectedDevice === device ? "bold" : "normal"
+                    }}
+                  >
+                    {device}
+                  </button>
+                ))}
+              </div>
+            </div>
+            
+            {/* RIGHT SIDE: Refresh Button */}
             <button 
-              // We grab the queryClient to trigger a manual refetch
               onClick={() => queryClient.invalidateQueries({ queryKey: ['attack_alerts'] })}
               style={{
-                background: COLORS.background, border: `1px solid ${COLORS.border}`, color: COLORS.cyan,
+                background: "transparent", border: `1px solid ${COLORS.border}`, color: COLORS.cyan,
                 padding: "4px 12px", borderRadius: "4px", cursor: "pointer", fontSize: "11px", fontWeight: "bold"
               }}
             >
@@ -418,18 +471,59 @@ export default function Analysis() {
             </button>
           </div>
 
-          {/* The Data Table */}
-          <AlertsTable />
+          {/* The Data Table (Passing the state down!) */}
+          <AlertsTable selectedDevice={selectedDevice} />
           
         </Card>
       )}
 
       {/* Tab Content: PREDICTIONS */}
-      {/* Tab Content: PREDICTIONS */}
       {activeTab === "predictions" && (
         <Card noPadding>
           <div style={{ padding: "16px", borderBottom: `1px solid ${COLORS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <CardLabel style={{ margin: 0 }}>LATEST ML PREDICTIONS (LIVE)</CardLabel>
+            
+            {/* Left side: Title and Toggle */}
+            <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+              <CardLabel style={{ margin: 0 }}>LATEST ML PREDICTIONS (LIVE)</CardLabel>
+              
+              {/* Hostname Segregation Toggle */}
+              <div style={{ display: "flex", background: "#080f1a", borderRadius: "4px", overflow: "hidden", border: `1px solid ${COLORS.border}` }}>
+                <button
+                  onClick={() => setSelectedDevice(null)} // Or "All" depending on your state logic
+                  style={{ 
+                    padding: "4px 12px", 
+                    background: !selectedDevice ? COLORS.cyan : "transparent", 
+                    color: !selectedDevice ? "#000" : COLORS.muted, 
+                    border: "none", 
+                    fontSize: "11px", 
+                    cursor: "pointer",
+                    fontWeight: !selectedDevice ? "bold" : "normal"
+                  }}
+                >
+                  All
+                </button>
+                {deviceList.map((device) => (
+                  <button
+                    key={device}
+                    onClick={() => setSelectedDevice(device)}
+                    style={{ 
+                      padding: "4px 12px", 
+                      background: selectedDevice === device ? COLORS.cyan : "transparent", 
+                      color: selectedDevice === device ? "#000" : COLORS.muted, 
+                      border: "none",
+                      borderLeft: `1px solid ${COLORS.border}`,
+                      fontSize: "11px", 
+                      cursor: "pointer",
+                      fontWeight: selectedDevice === device ? "bold" : "normal"
+                    }}
+                  >
+                    {device}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Right side: Streaming counter */}
             <span style={{ fontSize: "10px", color: COLORS.muted, fontFamily: "monospace" }}>
               {predictionLogs.length} logs · streaming
             </span>
@@ -437,6 +531,7 @@ export default function Analysis() {
           
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+              {/* ... Rest of your table code stays exactly the same ... */}
               <thead>
                 <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
                   {["TIME", "HOSTNAME", "SRC IP", "SRC_PORT", "DST IP", "DST_PORT", "PROTO", "SERVICE", "ATTACK TYPE", "SEVERITY", "CONFIDENCE"].map(h => (

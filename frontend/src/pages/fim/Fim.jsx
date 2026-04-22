@@ -317,39 +317,79 @@ export default function Fim() {
             ) : paths.map((p, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "7px 10px", background: "#060d1a", borderRadius: "6px", border: `1px solid ${COLORS.border}` }}>
                 <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: COLORS.green, flexShrink: 0, display: "inline-block" }} />
-                <span style={{ fontFamily: "monospace", fontSize: "11px", color: COLORS.text, flex: 1, wordBreak: "break-all" }}>{p}</span>
+                <span style={{ fontFamily: "monospace", fontSize: "11px", color: COLORS.text, flex: 1, wordBreak: "break-all", opacity: !selectedDevice ? 0.5 : 1 }}>{p}</span>
                 <button
                   onClick={() => handleRemovePath(p)}
-                  style={{ fontSize: "10px", color: COLORS.red, background: "transparent", border: "none", cursor: "pointer", opacity: 0.6, padding: "2px 4px" }}
+                  disabled={!selectedDevice} 
+                  title={!selectedDevice ? "Select a host to remove paths" : "Remove path"}
+                  style={{ 
+                    fontSize: "10px", 
+                    color: COLORS.red, 
+                    background: "transparent", 
+                    border: "none", 
+                    cursor: !selectedDevice ? "not-allowed" : "pointer", 
+                    opacity: !selectedDevice ? 0.2 : 0.6, 
+                    padding: "2px 4px" 
+                  }}
                 >
                   ✕
                 </button>
               </div>
             ))}
           </div>
+          
           <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: "12px" }}>
             <div style={{ fontSize: "10px", color: COLORS.muted, letterSpacing: "0.07em", marginBottom: "8px" }}>ADD MANUALLY</div>
+
             <div style={{ display: "flex", gap: "6px" }}>
               <input
                 value={newPath}
                 onChange={e => setNewPath(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleAddPath()}
-                placeholder="/custom/path"
-                style={{ flex: 1, background: "#060d1a", border: `1px solid ${COLORS.border}`, borderRadius: "6px", padding: "6px 10px", color: COLORS.text, fontSize: "12px", fontFamily: "monospace", outline: "none" }}
+                onKeyDown={e => e.key === "Enter" && selectedDevice && handleAddPath()}
+                disabled={!selectedDevice} 
+                placeholder={!selectedDevice ? "Select a host first..." : "/custom/path"}
+                style={{ 
+                  flex: 1, 
+                  background: !selectedDevice ? "transparent" : "#060d1a", 
+                  border: `1px solid ${COLORS.border}`, 
+                  borderRadius: "6px", 
+                  padding: "6px 10px", 
+                  color: !selectedDevice ? COLORS.muted : COLORS.text, 
+                  fontSize: "12px", 
+                  fontFamily: "monospace", 
+                  outline: "none",
+                  cursor: !selectedDevice ? "not-allowed" : "text"
+                }}
               />
               <button
                 onClick={() => handleAddPath()}
-                disabled={addPathMutation.isPending}
-                style={{ padding: "6px 12px", borderRadius: "6px", border: `1px solid ${COLORS.cyan}33`, background: `${COLORS.cyan}11`, color: COLORS.cyan, fontSize: "12px", cursor: "pointer", opacity: addPathMutation.isPending ? 0.5 : 1 }}
+                disabled={!selectedDevice || addPathMutation.isPending} 
+                style={{ 
+                  padding: "6px 12px", 
+                  borderRadius: "6px", 
+                  border: !selectedDevice ? `1px solid ${COLORS.border}` : `1px solid ${COLORS.cyan}33`, 
+                  background: !selectedDevice ? "transparent" : `${COLORS.cyan}11`, 
+                  color: !selectedDevice ? COLORS.muted : COLORS.cyan, 
+                  fontSize: "12px", 
+                  cursor: !selectedDevice ? "not-allowed" : "pointer", 
+                  opacity: (addPathMutation.isPending || !selectedDevice) ? 0.5 : 1 
+                }}
               >
                 {addPathMutation.isPending ? "..." : "Add"}
               </button>
             </div>
-            {pathMsg && (
+              
+            {/* Conditional messaging area */}
+            {!selectedDevice ? (
+              <div style={{ fontSize: "11px", marginTop: "6px", color: COLORS.red }}>
+                Please choose a specific host to add paths.
+              </div>
+            ) : pathMsg ? (
               <div style={{ fontSize: "11px", marginTop: "6px", color: pathMsg.type === "success" ? COLORS.green : COLORS.red }}>
                 {pathMsg.text}
               </div>
-            )}
+            ) : null}
+
           </div>
         </Card>
 

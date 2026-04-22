@@ -55,10 +55,13 @@ async def get_devices():
     
 
 @router.get("/network/logs")
-def get_network_logs(limit: int = 50):
+def get_network_logs(limit: int = 50, hostname: str = Query(default=None)):
     try:
+        query ={}
+        if hostname:
+            query["hostname"] = hostname
         # Fetching directly from network_logs
-        logs = list(db.network_logs.find().sort("timestamp", -1).limit(limit))
+        logs = list(db.network_logs.find(query).sort("timestamp", -1).limit(limit))
         
         formatted_logs = []
         for log in logs:
@@ -113,9 +116,12 @@ async def stream_network_logs(request: Request, hostname: str = Query(default=No
 
 
 @router.get("/predictions/logs")
-def get_logs(limit: int = 50):
+def get_logs(limit: int = 50, hostname: str = Query(default=None)):
     try:
-        logs = list(db.predictions.find().sort("timestamp", -1).limit(limit))
+        query = {}
+        if hostname:
+            query["hostname"] = hostname
+        logs = list(db.predictions.find(query).sort("timestamp", -1).limit(limit))
         return [serialize(log) for log in logs]
     except PyMongoError as e:
         raise HTTPException(status_code=500, detail=f"MongoDB error: {str(e)}")

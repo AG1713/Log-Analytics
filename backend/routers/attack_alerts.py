@@ -17,7 +17,8 @@ def get_alerts(
     limit: int = 100, 
     skip: int = 0, 
     status: Optional[str] = None,
-    include_archived: bool = False
+    include_archived: bool = False,
+    hostname: Optional[str] = None
 ):
     """Fetch alerts, optionally filtered by status (e.g., 'Inactive', 'Resolved')."""
     query = {}
@@ -27,6 +28,9 @@ def get_alerts(
 
     if status:
         query["status"] = status
+
+    if hostname:
+        query["hostname"] = hostname
         
     alerts_cursor = db["attack_alerts"].find(query).skip(skip).limit(limit).sort("last_seen", -1)
     
