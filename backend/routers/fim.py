@@ -221,3 +221,85 @@ async def get_baselines(hostname: str = Query(default=None)):
         query["hostname"] = hostname
     files = list(fim_db.file_baselines.find(query).limit(100))
     return [serialize(f) for f in files]
+
+
+
+@router.post("/api/agents/register")
+async def register_agent(request: Request):
+    """Registers an agent or updates its last_active heartbeat."""
+    data = await request.json()
+    hostname = data.get("hostname")
+    
+    if not hostname:
+        raise HTTPException(status_code=400, detail="Missing 'hostname' in request body")
+
+    now = datetime.now(timezone.utc)
+    
+    try:
+        db.agents.update_one(
+            {"hostname": hostname},
+            {
+                "$set": {"last_active": now, "status": "online"},
+                "$setOnInsert": {"first_seen": now}
+            },
+            upsert=True
+        )
+        return {"status": "success", "message": f"Agent {hostname} registered."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- FIM BASELINE ENDPOINTS ---
+
+@router.get("/api/fim/baseline/{hostname}")
+async def get_fim_baseline(hostname: str):
+    """Fetches the current FIM baseline for a specific host."""
+    try:
+        # Retrieve the baseline, excluding the MongoDB '_id' field
+        docs = fim_db.file_baselines.find({"hostname": hostname}, {"_id": 0, "filepath": 1, "hash": 1})
+        return list(docs)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/fim/baseline")
+async def upsert_fim_baseline(request: Request):
+    """Updates or inserts a file hash into the baseline."""
+    data = await request.json()
+    hostname = data.get("hostname")
+    filepath = data.get("filepath")
+    file_hash = data.get("hash")
+    
+    if not all([hostname, filepath, file_hash]):
+        raise HTTPException(status_code=400, detail="Missing 'hostname', 'filepath', or 'hash' in request body")
+
+    now = datetime.now(timezone.utc)
+    
+    try:
+        fim_db.file_baselines.update_one(
+            {"hostname": hostname, "filepath": filepath},
+            {"$set": {
+                "hash": file_hash,
+                "last_check": now
+            }},
+            upsert=True
+        )
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/api/fim/baseline")
+async def delete_fim_baseline(hostname: str, filepath: str):
+    """Removes a file from the baseline (used when a file is deleted)."""
+    if not hostname or not filepath:
+        raise HTTPException(status_code=400, detail="Missing 'hostname' or 'filepath' query parameters")
+
+    try:
+        result = fim_db.file_baselines.delete_one({"hostname": hostname, "filepath": filepath})
+        if result.deleted_count == 1:
+            return {"status": "success"}
+        else:
+            raise HTTPException(status_code=404, detail="Filepath not found in baseline")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
