@@ -233,17 +233,72 @@ class networkPackets():
         self.ip_conn_times[src_ip] = [t for t in self.ip_conn_times[src_ip] if t >= cutoff]
 
 
+import os
+import time
+import requests
+import hashlib
+from datetime import datetime, timezone
+
 class fimAlerts():
+    
+    # --- 1. NEW: Function to send status updates back to the backend ---
+    def update_path_status(self, path, status):
+        """Sends the validation result (ACTIVE or INVALID) to the backend."""
+        try:
+            payload = {
+                "hostname": AGENT_HOSTNAME, 
+                "path": path, 
+                "status": status
+            }
+            # We'll need to create this endpoint in the backend next!
+            requests.put(f"{BACKEND_URL}/update_path_status", json=payload, timeout=5)
+            print(f"[*] Path validation: '{path}' marked as {status}")
+        except Exception as e:
+            print(f"[!] Failed to update path status for {path}: {e}")
+
+    # --- 2. MODIFIED: Fetching the raw config ---
     def get_latest_watch_paths(self):
         try:
             response = requests.get(CONFIG_URL, timeout=2)
             if response.status_code == 200:
-                return response.json().get("paths", DEFAULT_PATHS)
+                # This now returns a list of dicts: [{"path": "/etc", "status": "PENDING"}, ...]
+                return response.json().get("paths", [])
         except Exception as e:
             print(f"[!] Config Sync Failed: {e}. Using defaults.")
-        return DEFAULT_PATHS
+        return []
 
-    def calculate_sha256(self,filepath):
+    # --- 3. NEW: Validation logic to filter and update states ---
+    def validate_and_get_active_paths(self, raw_paths):
+        active_paths = []
+        for item in raw_paths:
+            # Backwards compatibility in case older string records still exist
+            if isinstance(item, str):
+                if os.path.exists(item):
+                    active_paths.append(item)
+                continue
+
+            path_str = item.get("path")
+            status = item.get("status")
+
+            if status == "PENDING":
+                if os.path.exists(path_str):
+                    self.update_path_status(path_str, "ACTIVE")
+                    active_paths.append(path_str)
+                else:
+                    self.update_path_status(path_str, "INVALID")
+            
+            elif status == "ACTIVE":
+                if os.path.exists(path_str):
+                    active_paths.append(path_str)
+                else:
+                    # Auto-invalidate if an actively monitored directory is completely deleted
+                    self.update_path_status(path_str, "INVALID")
+            
+            # If status is "INVALID", we simply ignore it and do not add it to active_paths
+            
+        return active_paths
+
+    def calculate_sha256(self, filepath):
         sha256_hash = hashlib.sha256()
         try:
             if not os.path.isfile(filepath):
@@ -255,13 +310,16 @@ class fimAlerts():
         except (PermissionError, FileNotFoundError):
             return None
 
-    def run_fim_monitor(self,client):
+    def run_fim_monitor(self, client):
         fim_db = client.fim_integrity
         hashes_col = fim_db.file_baselines
 
         print("[*] FIM: Syncing with Backend Configuration...")
         baseline = {}
-        watch_list = self.get_latest_watch_paths()
+        
+        # --- 4. MODIFIED: Validate paths before establishing baseline ---
+        raw_paths = self.get_latest_watch_paths()
+        watch_list = self.validate_and_get_active_paths(raw_paths)
 
         for path in watch_list:
             for root, _, files in os.walk(path):
@@ -286,7 +344,11 @@ class fimAlerts():
 
         while True:
             time.sleep(CHECK_INTERVAL)
-            watch_list = self.get_latest_watch_paths()
+            
+            # --- 5. MODIFIED: Validate paths on every polling cycle ---
+            raw_paths = self.get_latest_watch_paths()
+            watch_list = self.validate_and_get_active_paths(raw_paths)
+            
             files_found_on_disk = set()
             now = datetime.now(timezone.utc)
 
@@ -314,7 +376,7 @@ class fimAlerts():
                                 {"$set": {
                                     "hostname": AGENT_HOSTNAME,
                                     "hash": current_hash,
-                                    "last_check": now  # Using the aware datetime you defined earlier
+                                    "last_check": now
                                 }}, 
                                 upsert=True
                             )
@@ -355,10 +417,9 @@ class fimAlerts():
                         del baseline[path]
                         hashes_col.delete_one({"filepath": path})
 
-
-    def send_fim_alert(self,data):
+    def send_fim_alert(self, data):
         try:
-            requests.post(BACKEND_URL, json=data, timeout=15)
+            requests.post(f"{BACKEND_URL}/alerts", json=data, timeout=15)
         except Exception as e:
             print(f"[!] Failed to ship alert: {e}")
 
@@ -413,7 +474,7 @@ def main():
     parser.add_argument("--siem_db_url", type=str, default="mongodb://172.17.0.1:27018/", help="used to provide the siem database url")
     parser.add_argument("--network_backend_url", type=str, default="http://172.17.0.1:8000/api/logs", help="used to provide the network alert to backend")
     parser.add_argument("--config_url", type=str, default="http://172.17.0.1:8000/api/config", help="used to provide the config url")
-    parser.add_argument("--backend_url", type=str, default="http://172.17.0.1:8000/api/alerts", help="used to provide backend url")
+    parser.add_argument("--backend_url", type=str, default="http://172.17.0.1:8000/api", help="used to provide backend url")
     parser.add_argument("--agent_hostname", type=str, default="host1", help="used to provide agent hostname")
 
     arguments = parser.parse_args()

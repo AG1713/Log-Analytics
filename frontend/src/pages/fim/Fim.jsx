@@ -314,28 +314,73 @@ export default function Fim() {
           <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginBottom: "12px" }}>
             {paths.length === 0 ? (
               <div style={{ fontSize: "12px", color: COLORS.muted }}>No paths configured</div>
-            ) : paths.map((p, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "7px 10px", background: "#060d1a", borderRadius: "6px", border: `1px solid ${COLORS.border}` }}>
-                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: COLORS.green, flexShrink: 0, display: "inline-block" }} />
-                <span style={{ fontFamily: "monospace", fontSize: "11px", color: COLORS.text, flex: 1, wordBreak: "break-all", opacity: !selectedDevice ? 0.5 : 1 }}>{p}</span>
-                <button
-                  onClick={() => handleRemovePath(p)}
-                  disabled={!selectedDevice} 
-                  title={!selectedDevice ? "Select a host to remove paths" : "Remove path"}
-                  style={{ 
-                    fontSize: "10px", 
-                    color: COLORS.red, 
-                    background: "transparent", 
-                    border: "none", 
-                    cursor: !selectedDevice ? "not-allowed" : "pointer", 
-                    opacity: !selectedDevice ? 0.2 : 0.6, 
-                    padding: "2px 4px" 
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+            ) : paths.map((p, i) => {
+              // 1. Extract path and status, keeping backwards compatibility for old string records
+              const pathString = typeof p === "string" ? p : p.path;
+              const pathStatus = typeof p === "string" ? "ACTIVE" : (p.status || "ACTIVE");
+
+              // 2. Determine dot styling based on status
+              let dotColor = COLORS.green; // Default ACTIVE
+              let dotPulse = false;
+              let tooltipText = "Actively monitored";
+
+              if (pathStatus === "PENDING") {
+                dotColor = "#eab308"; // Yellow/Amber
+                dotPulse = true;
+                tooltipText = "Pending validation by agent...";
+              } else if (pathStatus === "INVALID") {
+                dotColor = COLORS.red;
+                tooltipText = "Path not found on host";
+              }
+
+              return (
+                <div key={i} title={tooltipText} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "7px 10px", background: "#060d1a", borderRadius: "6px", border: `1px solid ${COLORS.border}` }}>
+                  
+                  {/* Dynamic Dot */}
+                  <span style={{ 
+                    width: "6px", 
+                    height: "6px", 
+                    borderRadius: "50%", 
+                    background: dotColor, 
+                    flexShrink: 0, 
+                    display: "inline-block",
+                    opacity: dotPulse ? 0.7 : 1, // Simple visual tweak for PENDING
+                    // Optional: If you have a CSS animation class for pulsing, add it to className here
+                  }} />
+                  
+                  {/* Path Text */}
+                  <span style={{ 
+                    fontFamily: "monospace", 
+                    fontSize: "11px", 
+                    color: COLORS.text, 
+                    flex: 1, 
+                    wordBreak: "break-all", 
+                    opacity: (!selectedDevice || pathStatus === "INVALID") ? 0.5 : 1,
+                    textDecoration: pathStatus === "INVALID" ? "line-through" : "none"
+                  }}>
+                    {pathString}
+                  </span>
+                  
+                  {/* Remove Button */}
+                  <button
+                    onClick={() => handleRemovePath(pathString)} // Make sure to pass pathString, not the object 'p'
+                    disabled={!selectedDevice} 
+                    title={!selectedDevice ? "Select a host to remove paths" : "Remove path"}
+                    style={{ 
+                      fontSize: "10px", 
+                      color: COLORS.red, 
+                      background: "transparent", 
+                      border: "none", 
+                      cursor: !selectedDevice ? "not-allowed" : "pointer", 
+                      opacity: !selectedDevice ? 0.2 : 0.6, 
+                      padding: "2px 4px" 
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
           </div>
           
           <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: "12px" }}>

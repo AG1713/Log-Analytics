@@ -51,8 +51,10 @@ def send_email_notification(alert_type, file_path, severity):
 @router.get("/config")
 async def get_config(hostname: str = Query(default=None)):
     query = {"type": "watch_config"}
-    if hostname:
-        query["hostname"] = hostname
+
+    if not hostname:
+        return {"paths": []}
+    query["hostname"] = hostname
     doc = config_db.settings.find_one(query)
     if not doc:
         return {"paths": []}
@@ -65,44 +67,97 @@ async def add_path(request: Request):
         data = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    
     print(data)
     new_path = data.get("path")
     hostname = data.get("hostname")
 
     if not new_path:
-        # Use proper HTTP error codes instead of a 200 OK with an "error" string
         raise HTTPException(status_code=400, detail="No path provided")
-
-    query = {"type": "watch_config"}
-    if hostname:
-        query["hostname"] = hostname
 
     # 2. Wrap DB operations in a try/except block
     try:
-        result = config_db.settings.update_one(
-            query,
-            {"$addToSet": {"paths": new_path}},
-            upsert=True,
-        )
-        
-        # 3. Check what the database actually did
-        if result.modified_count > 0:
-            print(f"[*] New path added to existing document: {new_path}")
-            return {"status": "success", "added": new_path}
-            
-        elif result.upserted_id:
-            print(f"[*] Created new document and added path: {new_path}")
-            return {"status": "success", "added": new_path, "upserted": True}
-            
-        else:
-            # If it didn't modify or upsert, $addToSet found a duplicate.
+        # First, check if this exact path is already being monitored (regardless of status)
+        existing_path = config_db.settings.find_one({
+            "type": "watch_config",
+            "hostname": hostname,
+            "paths.path": new_path  # Querying inside the array of objects
+        })
+
+        if existing_path:
             print(f"[*] Ignored: Path '{new_path}' is already in the array.")
             return {"status": "success", "message": "Path already exists"}
+
+        # 3. If it doesn't exist, push the new path object with PENDING status
+        path_object = {
+            "path": new_path,
+            "status": "PENDING"
+        }
+
+        result = config_db.settings.update_one(
+            {"type": "watch_config", "hostname": hostname},
+            {"$push": {"paths": path_object}},
+            upsert=True
+        )
+        
+        if result.modified_count > 0:
+            print(f"[*] New path added to existing document: {new_path} (PENDING)")
+            return {"status": "success", "added": new_path, "state": "PENDING"}
+            
+        elif result.upserted_id:
+            print(f"[*] Created new document and added path: {new_path} (PENDING)")
+            return {"status": "success", "added": new_path, "state": "PENDING", "upserted": True}
 
     except Exception as e:
         # 4. Catch and log the actual database error
         print(f"[!] Database operation failed: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal database error")
+
+
+@router.put("/update_path_status")
+async def update_path_status(request: Request):
+    # 1. Parse the raw JSON payload, matching your previous style
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    # 2. Extract the variables manually
+    hostname = data.get("hostname")
+    target_path = data.get("path")
+    new_status = data.get("status")
+
+    # 3. Basic validation to ensure the agent sent everything we need
+    if not hostname or not target_path or not new_status:
+        raise HTTPException(status_code=400, detail="Missing required fields: hostname, path, or status")
+
+    # 4. Execute the database update
+    try:
+        result = config_db.settings.update_one(
+            {
+                "type": "watch_config", 
+                "hostname": hostname,
+                "paths.path": target_path  # Find the specific path inside the array
+            },
+            {
+                "$set": {"paths.$.status": new_status}  # Update only that path's status
+            }
+        )
+
+        if result.modified_count > 0:
+            print(f"[*] FIM State Machine: Updated {target_path} to [{new_status}] on {hostname}")
+            return {"status": "success", "message": "Status updated successfully"}
+            
+        elif result.matched_count > 0:
+            return {"status": "success", "message": "Status unchanged"}
+            
+        else:
+            print(f"[!] FIM State Machine: Could not find path {target_path} to update.")
+            raise HTTPException(status_code=404, detail="Path or host configuration not found")
+
+    except Exception as e:
+        print(f"[!] Database error in update_path_status: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/config/path")
