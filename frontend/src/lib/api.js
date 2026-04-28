@@ -63,4 +63,7 @@ export const api = {
   deleteAttackAlert:          (id) => del(`/api/attack_alerts/${id}`), // Soft deletes an alert
   clearAttackAlerts:          (hostname) => del(`/api/attack_alerts${hostname ? `?hostname=${hostname}` : ""}`),
 
+  // Agent Download
+  getAgentDownloadUrl: (osType) => `http://localhost:8000/api/download_agent?os_type=${osType}&t=${Date.now()}`,
+
 };

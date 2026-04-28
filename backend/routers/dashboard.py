@@ -1,10 +1,12 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pymongo.errors import PyMongoError
 
 from database import db
 from .fim import serialize
+import os
 
 router = APIRouter(prefix="/api", tags=["Dashboard"])
 
@@ -286,3 +288,32 @@ def attack_timeline(hours: int = 6):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+@router.get("/download_agent")
+async def download_agent(os_type: str):
+    # 1. Define the directory where you put the files
+    AGENTS_DIR = "agent_files" 
+    
+    # 2. Map the frontend dropdown selection to your actual filenames
+    file_map = {
+        "windows": "agent_windows.py",
+        "linux": "agent_linux.py",
+    }
+    
+    target_filename = file_map.get(os_type.lower())
+    if not target_filename:
+        raise HTTPException(status_code=400, detail="Invalid OS selected")
+        
+    file_path = os.path.join(AGENTS_DIR, target_filename)
+    
+    # 3. Check if the file actually exists to prevent crashes
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"Agent file for {os_type} not found on server")
+        
+    # 4. Serve the file to the user
+    # 'filename' is what the file will be called when it saves to their Downloads folder
+    return FileResponse(
+        path=file_path, 
+        filename=f"agent.py", 
+        media_type='text/x-python'
+    )

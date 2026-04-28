@@ -5,6 +5,7 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   LineChart, Line, XAxis, YAxis, CartesianGrid, BarChart, Bar
 } from "recharts";
+import { Download, Copy, Terminal, Check } from 'lucide-react';
 
 // --- Constants ---
 const COLORS = {
@@ -119,6 +120,39 @@ const ProtoBadge = ({ proto }) => {
 
 // --- Main Component ---
 export default function Dashboard() {
+
+  // New state for the modal
+  const [showAgentModal, setShowAgentModal] = useState(false);
+  const [selectedOS, setSelectedOS] = useState('linux');
+  const [copied, setCopied] = useState(false);
+
+  // Generate the exact command based on their current dashboard context
+  const generateCommand = () => {
+    const host = selectedDevice || "YOUR_HOSTNAME";
+    // You can hardcode your production IP here, or use window.location.hostname
+    const backendUrl = "http://YOUR_BACKEND_IP:8000"; 
+
+    if (selectedOS === 'windows') {
+      // Windows usually just uses 'python' and runs from the current directory
+      return `python agent.py --agent_hostname=${host} --backend_url=${backendUrl}`;
+    } else {
+      // Linux/Mac version based on your example
+      return `python3 -u /usr/local/bin/agent.py --agent_hostname=${host} --backend_url=${backendUrl}`;
+    }
+  };
+
+  const handleCopyCommand = () => {
+    navigator.clipboard.writeText(generateCommand());
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleDownload = () => {
+    // Use the API object to get the full URL, then open it to trigger the download
+    const downloadUrl = api.getAgentDownloadUrl(selectedOS);
+    window.open(downloadUrl, '_blank');
+  };
+
   const [showNetworkLogs, setShowNetworkLogs] = useState(false);
   const [selectedDevice, setSelectedDevice]   = useState(null);
   const queryClient = useQueryClient();
@@ -231,6 +265,28 @@ export default function Dashboard() {
           <p style={{ fontSize: "10px", color: COLORS.muted, margin: 0, fontFamily: "monospace", letterSpacing: "0.06em" }}>
             SYSTEM HEALTH & TRIAGE · {new Date().toUTCString()}
           </p>
+        </div>
+
+        <div className="flex justify-between items-center mb-6">
+          <button 
+            onClick={() => setShowAgentModal(true)}
+            style={{
+              display: "flex", 
+              alignItems: "center", 
+              gap: "8px",
+              background: `${COLORS.cyan}15`, // Subtle cyan fill
+              color: COLORS.cyan, 
+              border: `1px solid ${COLORS.cyan}40`, // Thin cyan border
+              padding: "8px 16px", 
+              borderRadius: "6px",
+              cursor: "pointer", 
+              fontSize: "14px", 
+              fontWeight: "500"
+            }}
+          >
+            <Download size={16} />
+            Deploy Agent
+          </button>
         </div>
       </div>
 
@@ -498,6 +554,108 @@ export default function Dashboard() {
           </table>
         </Card>
       )}
+
+      {showAgentModal && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: "rgba(0, 0, 0, 0.7)", display: "flex",
+          alignItems: "center", justifyContent: "center", zIndex: 1000
+        }}>
+          <div style={{
+            background: COLORS.card, // Using your palette
+            border: `1px solid ${COLORS.border}`,
+            borderRadius: "8px", width: "450px", padding: "20px",
+            display: "flex", flexDirection: "column", gap: "20px"
+          }}>
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-center">
+              <h3 style={{ margin: 0, color: COLORS.text, fontSize: "18px" }}>Deploy FIM Agent</h3>
+              <button 
+                onClick={() => setShowAgentModal(false)}
+                style={{ background: "transparent", border: "none", color: COLORS.muted, cursor: "pointer", fontSize: "18px" }}
+              >
+                ✕
+              </button>
+            </div>
+        
+            {/* STEP 1: OS Selection & Download */}
+            <div>
+              <label style={{ fontSize: "12px", color: COLORS.muted, marginBottom: "8px", display: "block" }}>
+                1. Select OS & Download
+              </label>
+              <div style={{ display: "flex", gap: "10px", marginBottom: "12px" }}>
+                {['linux', 'windows'].map(os => (
+                  <button
+                    key={os}
+                    onClick={() => setSelectedOS(os)}
+                    style={{
+                      flex: 1, padding: "8px", borderRadius: "6px", textTransform: "capitalize",
+                      background: selectedOS === os ? `${COLORS.blue}22` : "transparent",
+                      border: `1px solid ${selectedOS === os ? COLORS.blue : COLORS.border}`,
+                      color: selectedOS === os ? COLORS.blue : COLORS.text,
+                      cursor: "pointer"
+                    }}
+                  >
+                    {os}
+                  </button>
+                ))}
+              </div>
+              <button 
+                onClick={handleDownload}
+                style={{
+                  display: "flex", width: "100%", alignItems: "center", justifyContent: "center", gap: "8px",
+                  background: `${COLORS.green}15`, color: COLORS.green, 
+                  border: `1px solid ${COLORS.green}40`, padding: "10px", borderRadius: "6px",
+                  cursor: "pointer", fontWeight: "bold", 
+                }}
+              >
+                <Download size={16} /> Download {selectedOS} Agent
+              </button>
+            </div>
+
+            {/* STEP 2: Placement Instruction */}
+            <div>
+              <label style={{ fontSize: "12px", color: COLORS.muted, marginBottom: "8px", display: "block" }}>
+                2. Setup the File
+              </label>
+              <div style={{ 
+                fontSize: "13px", color: COLORS.text, background: COLORS.bg, 
+                padding: "12px", borderRadius: "6px", border: `1px solid ${COLORS.border}`,
+                lineHeight: "1.5"
+              }}>
+                Move the downloaded <strong style={{ color: COLORS.cyan }}>agent.py</strong> file into your server's main directory (or the specific folder you intend to run it from).
+              </div>
+            </div>
+              
+            {/* STEP 3: Execution Command */}
+            <div>
+              <label style={{ fontSize: "12px", color: COLORS.muted, marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                <Terminal size={12} /> 3. Run this command in that directory
+              </label>
+              <div style={{ background: COLORS.bg, padding: "15px", borderRadius: "6px", border: `1px solid ${COLORS.border}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
+                  <code style={{ 
+                    display: "block", fontFamily: "monospace", fontSize: "12px", 
+                    color: COLORS.green, wordBreak: "break-all", flex: 1 
+                  }}>
+                    {generateCommand()}
+                  </code>
+                  <button 
+                    onClick={handleCopyCommand}
+                    style={{ background: "transparent", border: "none", color: COLORS.text, cursor: "pointer", padding: "0" }}
+                    title="Copy command"
+                  >
+                    {copied ? <Check size={16} color={COLORS.green} /> : <Copy size={16} color={COLORS.muted} />}
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
