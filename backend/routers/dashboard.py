@@ -223,11 +223,13 @@ def analysis_summary():
             for item in attack_data
         }
 
+        active_investigations = db.network_logs.count_documents({}) - db.predictions.count_documents({})
+
         return {
             "total_attacks": total_attacks,
             "dos_count": dos_count,
             "port_scan_count": port_scan_count,
-            "active_investigations": 3, # Placeholder for your Alerts engine later
+            "active_investigations": active_investigations,
             "attack_distribution": attack_distribution
         }
 

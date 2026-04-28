@@ -321,7 +321,7 @@ export default function Analysis() {
         <StatCard label="TOTAL ATTACKS FLAGGED" value={summary.total_attacks} accent={COLORS.red} sub="Lifetime detections" />
         <StatCard label="DoS DETECTIONS" value={summary.dos_count || 0} accent={COLORS.orange} sub="High confidence flags" />
         <StatCard label="PORT SCAN DETECTIONS" value={summary.port_scan_count || 0} accent={COLORS.purple} sub="Reconnaissance activity" />
-        <StatCard label="ACTIVE INVESTIGATIONS" value={3} accent={COLORS.cyan} sub="Pending review (Placeholder)" />
+        <StatCard label="ACTIVE INVESTIGATIONS" value={summary.active_investigations || 0} accent={COLORS.cyan} sub="Pending review" />
       </div>
 
       {/* ROW 2: Charts */}
@@ -585,7 +585,11 @@ export default function Analysis() {
                       <td style={{ padding: "10px 16px" }}>
                         <SeverityBadge severity={log.severity} />
                       </td>
-                      <td style={{ padding: "10px 16px", fontFamily: "monospace", fontSize: "10px", color: log.confidence >= 0.9 ? COLORS.red : log.confidence >= 0.7 ? COLORS.amber : COLORS.green }}>
+                      <td style={{ padding: "10px 16px", fontFamily: "monospace", fontSize: "10px",
+                      color: log.attack !== "Attack" ? COLORS.muted :
+                          log.confidence >= 0.9   ? COLORS.red :
+                          log.confidence >= 0.7   ? COLORS.amber : 
+                          COLORS.green }}>
                         {log.confidence != null ? `${(log.confidence * 100).toFixed(1)}%` : "—"}
                       </td>
                     </tr>

@@ -363,7 +363,7 @@ export default function Fim() {
                   
                   {/* Remove Button */}
                   <button
-                    onClick={() => handleRemovePath(pathString)} // Make sure to pass pathString, not the object 'p'
+                    onClick={() => handleRemovePath(p)}
                     disabled={!selectedDevice} 
                     title={!selectedDevice ? "Select a host to remove paths" : "Remove path"}
                     style={{ 
