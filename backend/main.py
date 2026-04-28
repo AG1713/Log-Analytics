@@ -152,7 +152,26 @@ def health():
 @app.post("/api/chatbot/query")
 async def chatbot_query(req: ChatRequest):
     try:
-        filters, collection = parse_query(req.query)
+        parsed = parse_query(req.query)
+
+        # ❌ UNKNOWN QUERY
+        if parsed.get("intent") == "unknown":
+            return {
+                "success": False,
+                "message": parsed.get("message", "I didn't understand your query.")
+            }
+
+        # ℹ️ INFO QUERY (future AI integration)
+        if parsed.get("intent") == "info":
+            return {
+                "success": True,
+                "type": "info",
+                "message": f"Information about '{parsed.get('topic')}' will be available soon."
+            }
+
+        # 🔍 NORMAL SEARCH
+        filters = parsed.get("filters", {})
+        collection = parsed.get("collection", "network_logs")
 
         results = fetch_logs(db, filters, collection)
 

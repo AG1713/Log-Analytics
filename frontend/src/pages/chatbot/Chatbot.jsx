@@ -9,6 +9,7 @@ const COLORS = {
   cyan:   "#00d4ff",
   green:  "#10b981",
   red:    "#ef4444",
+  amber:  "#f59e0b",
 };
 
 export default function Chatbot() {
@@ -35,24 +36,37 @@ export default function Chatbot() {
       setData(json);
     } catch (err) {
       console.error(err);
-      setData({ error: "Failed to fetch" });
+      setData({ error: "Failed to connect to backend" });
     }
 
     setLoading(false);
   };
 
   return (
-    <div style={{ background: COLORS.bg, minHeight: "100vh", padding: "24px" }}>
-      
+    <div style={{
+      background: COLORS.bg,
+      minHeight: "100vh",
+      padding: "24px",
+      color: COLORS.text
+    }}>
+
       {/* HEADER */}
-      <h1 style={{
-        color: COLORS.text,
-        fontSize: "20px",
-        fontWeight: "bold",
-        marginBottom: "12px"
-      }}>
-        AI Security Chatbot
-      </h1>
+      <div style={{ marginBottom: "18px" }}>
+        <h1 style={{
+          fontSize: "20px",
+          fontWeight: "bold",
+          marginBottom: "4px"
+        }}>
+          AI Security Chatbot
+        </h1>
+        <p style={{
+          fontSize: "11px",
+          color: COLORS.muted,
+          fontFamily: "monospace"
+        }}>
+          Query your network logs using natural language
+        </p>
+      </div>
 
       {/* INPUT */}
       <div style={{
@@ -71,7 +85,8 @@ export default function Chatbot() {
             border: `1px solid ${COLORS.border}`,
             background: COLORS.card,
             color: COLORS.text,
-            outline: "none"
+            outline: "none",
+            fontSize: "12px"
           }}
         />
 
@@ -84,59 +99,126 @@ export default function Chatbot() {
             border: "none",
             borderRadius: "6px",
             cursor: "pointer",
-            fontWeight: "bold"
+            fontWeight: "bold",
+            fontSize: "12px"
           }}
         >
           Search
         </button>
       </div>
 
+      {/* QUICK SUGGESTIONS */}
+      {!data && !loading && (
+        <div style={{
+          fontSize: "11px",
+          color: COLORS.muted,
+          marginBottom: "12px"
+        }}>
+          Try:
+          <div style={{ marginTop: "6px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            {[
+              "show dos attacks last 1 hour",
+              "show high severity attacks",
+              "any portscan attacks?",
+              "show normal traffic last 10 minutes"
+            ].map((q, i) => (
+              <button
+                key={i}
+                onClick={() => setQuery(q)}
+                style={{
+                  background: "#0a1a2f",
+                  border: `1px solid ${COLORS.border}`,
+                  color: COLORS.cyan,
+                  padding: "4px 8px",
+                  borderRadius: "5px",
+                  fontSize: "10px",
+                  cursor: "pointer"
+                }}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* LOADING */}
       {loading && (
-        <div style={{ color: COLORS.muted }}>Processing query...</div>
+        <div style={{ color: COLORS.muted, fontSize: "12px" }}>
+          Processing query...
+        </div>
       )}
 
       {/* ERROR */}
       {data?.error && (
-        <div style={{ color: COLORS.red }}>{data.error}</div>
+        <div style={{
+          background: "#2a0000",
+          border: `1px solid ${COLORS.red}33`,
+          padding: "10px",
+          borderRadius: "6px",
+          color: COLORS.red,
+          fontSize: "12px"
+        }}>
+          {data.error}
+        </div>
+      )}
+
+      {/* UNKNOWN / MESSAGE */}
+      {data && data.success === false && (
+        <div style={{
+          background: "#1a1a00",
+          border: `1px solid ${COLORS.amber}33`,
+          padding: "10px",
+          borderRadius: "6px",
+          color: COLORS.amber,
+          fontSize: "12px"
+        }}>
+          {data.message}
+        </div>
       )}
 
       {/* RESULTS */}
-      {data && !loading && !data.error && (
+      {data && data.success && !loading && (
         <div style={{
           background: COLORS.card,
           border: `1px solid ${COLORS.border}`,
           borderRadius: "8px",
           padding: "16px"
         }}>
-          
-          {/* FILTER INFO */}
+
+          {/* FILTERS */}
           <div style={{
-            fontSize: "12px",
+            fontSize: "10px",
             color: COLORS.muted,
-            marginBottom: "10px"
+            marginBottom: "8px",
+            fontFamily: "monospace"
           }}>
             Filters: {JSON.stringify(data.filters)}
           </div>
 
+          {/* COUNT */}
           <div style={{
             fontSize: "12px",
-            marginBottom: "10px",
-            color: COLORS.text
+            marginBottom: "10px"
           }}>
             Results: {data.count}
           </div>
 
           {/* TABLE */}
-          {data.results.length > 0 ? (
-            <table style={{ width: "100%", fontSize: "12px" }}>
+          {data.results && data.results.length > 0 ? (
+            <table style={{
+              width: "100%",
+              fontSize: "11px",
+              borderCollapse: "collapse"
+            }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
                   {["Time", "Attack", "Prediction", "Severity", "Src IP", "Dst IP"].map(h => (
                     <th key={h} style={{
                       textAlign: "left",
                       padding: "8px",
-                      color: COLORS.muted
+                      color: COLORS.muted,
+                      fontWeight: 500
                     }}>
                       {h}
                     </th>
@@ -146,19 +228,43 @@ export default function Chatbot() {
 
               <tbody>
                 {data.results.map((row, i) => (
-                  <tr key={i} style={{ borderBottom: "1px solid #08121f" }}>
-                    <td style={{ padding: "8px", color: COLORS.muted }}>{row.time}</td>
-                    <td style={{ padding: "8px", color: COLORS.red }}>{row.attack_type}</td>
-                    <td style={{ padding: "8px", color: COLORS.text }}>{row.prediction}</td>
-                    <td style={{ padding: "8px", color: COLORS.cyan }}>{row.severity}</td>
-                    <td style={{ padding: "8px", color: COLORS.text }}>{row.src_ip}</td>
-                    <td style={{ padding: "8px", color: COLORS.text }}>{row.dst_ip}</td>
+                  <tr key={i} style={{
+                    borderBottom: "1px solid #08121f"
+                  }}>
+                    <td style={{ padding: "8px", color: COLORS.muted }}>
+                      {row.time || "—"}
+                    </td>
+
+                    <td style={{ padding: "8px", color: COLORS.red }}>
+                      {row.attack_type || "—"}
+                    </td>
+
+                    <td style={{ padding: "8px" }}>
+                      {row.prediction || "—"}
+                    </td>
+
+                    <td style={{ padding: "8px", color: COLORS.cyan }}>
+                      {row.severity || "—"}
+                    </td>
+
+                    <td style={{ padding: "8px" }}>
+                      {row.src_ip || "—"}
+                    </td>
+
+                    <td style={{ padding: "8px" }}>
+                      {row.dst_ip || "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           ) : (
-            <div style={{ color: COLORS.muted }}>
+            <div style={{
+              color: COLORS.muted,
+              fontSize: "12px",
+              textAlign: "center",
+              padding: "12px"
+            }}>
               No results found
             </div>
           )}
