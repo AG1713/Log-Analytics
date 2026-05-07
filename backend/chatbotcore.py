@@ -7,21 +7,38 @@ def parse_query(query: str):
 
     filters = {}
     collection = "network_logs"
-    # Attack types
-    attack_types = ["dos", "portscan", "bruteforce", "fuzzer"]
-    for attack in attack_types:
-        if attack in query:
-            filters["attack_type"] = {"$regex": attack, "$options": "i"}
+    intent = "unknown"
+
+    # ---------------- ATTACK TYPES ----------------
+    attack_map = {
+        "dos": "DoS",
+        "portscan": "Portscan",
+        "bruteforce": "Bruteforce",
+        "fuzzer": "Fuzzer",
+        "backdoor": "Backdoor",
+        "exploit": "Exploits",
+        "recon": "Reconnaissance",
+        "worm": "Worms"
+    }
+
+    for key, value in attack_map.items():
+        if key in query:
+            filters["attack_type"] = {"$regex": key, "$options": "i"}
             collection = "predictions"
-    # Prediction
+            intent = "search"
+
+    # ---------------- PREDICTION ----------------
     if "attack" in query:
         filters["prediction"] = "Attack"
         collection = "predictions"
+        intent = "search"
+
     elif "normal" in query:
         filters["prediction"] = "Normal"
         collection = "predictions"
+        intent = "search"
 
-    # Severity
+    # ---------------- SEVERITY ----------------
     if "high" in query:
         filters["severity"] = "high"
     elif "medium" in query:
@@ -29,25 +46,46 @@ def parse_query(query: str):
     elif "low" in query:
         filters["severity"] = "low"
 
-    # Time parsing
+    # ---------------- TIME ----------------
     now = datetime.now(timezone.utc)
 
     minutes_match = re.search(r'last (\d+) minute', query)
     if minutes_match:
-        mins = int(minutes_match.group(1))
-        filters["timestamp"] = {"$gte": now - timedelta(minutes=mins)}
+        filters["timestamp"] = {
+            "$gte": now - timedelta(minutes=int(minutes_match.group(1)))
+        }
+        intent = "search"
 
     hours_match = re.search(r'last (\d+) hour', query)
     if hours_match:
-        hrs = int(hours_match.group(1))
-        filters["timestamp"] = {"$gte": now - timedelta(hours=hrs)}
+        filters["timestamp"] = {
+            "$gte": now - timedelta(hours=int(hours_match.group(1)))
+        }
+        intent = "search"
 
     days_match = re.search(r'last (\d+) day', query)
     if days_match:
-        days = int(days_match.group(1))
-        filters["timestamp"] = {"$gte": now - timedelta(days=days)}
+        filters["timestamp"] = {
+            "$gte": now - timedelta(days=int(days_match.group(1)))
+        }
+        intent = "search"
 
-    return filters, collection
+    # ---------------- GENERAL QUESTIONS ----------------
+    if any(word in query for word in ["what is", "explain", "define"]):
+        intent = "info"
+
+    # ---------------- FALLBACK ----------------
+    if intent == "unknown":
+        return {
+            "intent": "unknown",
+            "message": "I didn’t understand your query. Try something like: 'show dos attacks last 1 hour'"
+        }
+
+    return {
+        "intent": intent,
+        "filters": filters,
+        "collection": collection
+    }
 
 
 # ---------------- FETCH FROM DB ----------------
