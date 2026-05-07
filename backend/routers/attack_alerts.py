@@ -6,7 +6,7 @@ from database import db
 from routers.network_logs import serialize
 
 router = APIRouter(
-    prefix="/api/attack_alerts",
+    prefix="/api/attack-alerts",
     tags=["Attack Alerts"]
 )
 
@@ -38,7 +38,17 @@ def get_alerts(
     alerts = [serialize(alert) for alert in alerts_cursor]
     return alerts
 
-@router.post("/{alert_id}/toggle")
+@router.get("/recent")
+def recent_attacks(hostname = None, limit: int = 5):
+    """Fetches recent attack alerts, optionally filtered by hostname."""
+    query = {"is_archived": {"$ne": True}}
+    query["event_count"] = {"$gt": 10}
+    if hostname:
+        query["hostname"] = hostname
+    alerts = list(db.attack_alerts.find(query).sort("last_seen", -1).limit(limit))
+    return [serialize(a) for a in alerts]
+
+@router.patch("/{alert_id}")
 def toggle_alert_status(alert_id: str, idle_minutes: int = 1):
     """Toggles the alert status between 'Inactive' and 'Resolved'."""
     if not ObjectId.is_valid(alert_id):

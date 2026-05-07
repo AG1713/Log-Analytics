@@ -8,12 +8,13 @@ from database import db
 from .fim import serialize
 import os
 
-router = APIRouter(prefix="/api", tags=["Dashboard"])
+router = APIRouter(prefix="/api/metrics", tags=["Metrics"])
 
 NORMAL_LABEL = "Normal"
 
-@router.get("/attack-summary")
+@router.get("/network/overview")
 def attack_summary():
+    """Provides a summary of attack statistics for the dashboard overview."""
     try:
         # Existing logic
         total_records = db.network_logs.count_documents({})
@@ -88,7 +89,7 @@ def attack_summary():
     # }
 
 
-@router.get("/traffic-timeline")
+@router.get("/network/timeline")
 def traffic_timeline(hours: int = 6):
     """Aggregates raw network logs by minute to show traffic volume over time"""
     try:
@@ -138,7 +139,7 @@ def traffic_timeline(hours: int = 6):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
     # formatted_data = []
-    # now = datetime.utcnow()
+    # now = datetime.now(timezone.utc)
     
     # for i in range(60):
     #     # Create timestamps going back in time
@@ -158,50 +159,10 @@ def traffic_timeline(hours: int = 6):
         
     # return formatted_data
 
-@router.get("/recent-attacks")
-def recent_attacks(hostname = None, limit: int = 5):
-    query = {"is_archived": {"$ne": True}}
-    query["event_count"] = {"$gt": 10}
-    if hostname:
-        query["hostname"] = hostname
-    alerts = list(db.attack_alerts.find(query).sort("last_seen", -1).limit(limit))
-    return [serialize(a) for a in alerts]
 
-@router.get("/recent-fim")
-def recent_fim(hostname = None, limit: int = 5):
-    query = {}
-    if hostname:
-        query["hostname"] = hostname
-    alerts = list(db.alerts.find(query).sort("_id", -1).limit(limit)) # currently sorting with id since theres no timestamp field.
-    return [serialize(a) for a in alerts]
-    # now_iso = datetime.utcnow().isoformat()
-    # fim_alerts = []
-    
-    # for i in range(limit):
-    #     fim_alerts.append({
-    #         "_id": f"fake_fim_id_{i}",
-    #         "file_path": f"/etc/nginx/conf.d/site_{i}.conf" if i % 2 == 0 else f"/usr/bin/custom_script_{i}.sh",
-    #         "hostname": "server-alpha",
-    #         "timestamp": now_iso,
-    #         "action": "MODIFIED" if i % 2 == 0 else "DELETED"
-    #     })
-        
-    # return fim_alerts
-
-
-@router.get("/live-attacks")
-def live_attacks():
-    try:
-        count = db.predictions.count_documents({"attack": {"$ne": NORMAL_LABEL}})
-        return {"live_attacks": count}
-    except PyMongoError as e:
-        raise HTTPException(status_code=500, detail=f"MongoDB error: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
-
-
-@router.get("/analysis-summary")
+@router.get("/threats/overview")
 def analysis_summary():
+    """Provides a summary of analysis results for the Analysis page overview."""
     try:
         # 1. Total flagged attacks (everything EXCEPT normal/benign)
         total_attacks = db.predictions.count_documents({"attack": {"$nin": [NORMAL_LABEL, "BENIGN"]}})
@@ -238,11 +199,11 @@ def analysis_summary():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
-@router.get("/attack-timeline")
+@router.get("/threats/timeline")
 def attack_timeline(hours: int = 6):
     """Aggregates predictions by minute, splitting counts by attack type"""
     try:
-        start_time = datetime.utcnow() - timedelta(hours=hours)
+        start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         
         # Note: Since we verified your predictions collection uses native ISODates, 
         # we don't need the $toDate string-parsing trick here!
@@ -289,7 +250,7 @@ def attack_timeline(hours: int = 6):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
-@router.get("/download_agent")
+@router.get("/agent")
 async def download_agent(os_type: str):
     # 1. Define the directory where you put the files
     AGENTS_DIR = "agent_files" 

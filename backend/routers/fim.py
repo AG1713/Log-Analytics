@@ -1,5 +1,5 @@
 import smtplib
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 
 from bson import ObjectId
@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query, Request, HTTPException
 
 from database import db, config_db, fim_db
 
-router = APIRouter(prefix="/api", tags=["FIM"])
+router = APIRouter(prefix="/api/fim", tags=["FIM"])
 
 GMAIL_USER        = "your_actual_email@gmail.com"
 GMAIL_APP_PASSWORD = "abcd efgh ijkl mnop"
@@ -48,7 +48,7 @@ def send_email_notification(alert_type, file_path, severity):
         print(f"[!] Email failed: {e}")
 
 
-@router.get("/config")
+@router.get("/paths")
 async def get_config(hostname: str = Query(default=None)):
     query = {"type": "watch_config"}
 
@@ -60,7 +60,7 @@ async def get_config(hostname: str = Query(default=None)):
         return {"paths": []}
     return {"paths": doc["paths"]}
 
-@router.post("/add_path")
+@router.post("/paths")
 async def add_path(request: Request):
     # 1. Catch JSON parsing errors
     try:
@@ -114,7 +114,7 @@ async def add_path(request: Request):
         raise HTTPException(status_code=500, detail="Internal database error")
 
 
-@router.put("/update_path_status")
+@router.put("/paths")
 async def update_path_status(request: Request):
     # 1. Parse the raw JSON payload, matching your previous style
     try:
@@ -160,7 +160,7 @@ async def update_path_status(request: Request):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/config/path")
+@router.delete("/paths")
 async def remove_path(request: Request):
     data = await request.json()
     path = data.get("path")
@@ -196,6 +196,27 @@ async def get_alerts(hostname: str = Query(default=None)):
     alerts = list(db.alerts.find(query).sort("_id", -1))
     return [serialize(a) for a in alerts]
 
+@router.get("/alerts/recent")
+def recent_fim(hostname = None, limit: int = 5):
+    """Fetches recent FIM alerts, optionally filtered by hostname."""
+    query = {}
+    if hostname:
+        query["hostname"] = hostname
+    alerts = list(db.alerts.find(query).sort("_id", -1).limit(limit)) # currently sorting with id since theres no timestamp field.
+    return [serialize(a) for a in alerts]
+    # now_iso = datetime.utcnow().isoformat()
+    # fim_alerts = []
+    
+    # for i in range(limit):
+    #     fim_alerts.append({
+    #         "_id": f"fake_fim_id_{i}",
+    #         "file_path": f"/etc/nginx/conf.d/site_{i}.conf" if i % 2 == 0 else f"/usr/bin/custom_script_{i}.sh",
+    #         "hostname": "server-alpha",
+    #         "timestamp": now_iso,
+    #         "action": "MODIFIED" if i % 2 == 0 else "DELETED"
+    #     })
+        
+    # return fim_alerts
 
 @router.delete("/alerts/{alert_id}")
 async def delete_alert(alert_id: str):
@@ -214,7 +235,7 @@ async def clear_alerts(hostname: str = Query(default=None)):
     return {"status": "success", "deleted": result.deleted_count}
 
 
-@router.get("/fim/baselines")
+@router.get("/baselines")
 async def get_baselines(hostname: str = Query(default=None)):
     query = {}
     if hostname:
@@ -224,7 +245,7 @@ async def get_baselines(hostname: str = Query(default=None)):
 
 
 
-@router.post("/api/agents/register")
+@router.post("/agents")
 async def register_agent(request: Request):
     """Registers an agent or updates its last_active heartbeat."""
     data = await request.json()
@@ -251,7 +272,7 @@ async def register_agent(request: Request):
 
 # --- FIM BASELINE ENDPOINTS ---
 
-@router.get("/api/fim/baseline/{hostname}")
+@router.get("/baselines/{hostname}")
 async def get_fim_baseline(hostname: str):
     """Fetches the current FIM baseline for a specific host."""
     try:
@@ -262,7 +283,7 @@ async def get_fim_baseline(hostname: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/api/fim/baseline")
+@router.post("/baselines")
 async def upsert_fim_baseline(request: Request):
     """Updates or inserts a file hash into the baseline."""
     data = await request.json()
@@ -289,7 +310,7 @@ async def upsert_fim_baseline(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/api/fim/baseline")
+@router.delete("/baselines")
 async def delete_fim_baseline(hostname: str, filepath: str):
     """Removes a file from the baseline (used when a file is deleted)."""
     if not hostname or not filepath:

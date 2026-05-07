@@ -251,7 +251,7 @@ class fimAlerts():
                 "status": status
             }
             # We'll need to create this endpoint in the backend next!
-            requests.put(f"{BACKEND_URL}/update_path_status", json=payload, timeout=5)
+            requests.put(f"{BACKEND_URL}/fim/paths", json=payload, timeout=5)
             print(f"[*] Path validation: '{path}' marked as {status}")
         except Exception as e:
             print(f"[!] Failed to update path status for {path}: {e}")
@@ -259,7 +259,9 @@ class fimAlerts():
     # --- 2. MODIFIED: Fetching the raw config ---
     def get_latest_watch_paths(self):
         try:
-            response = requests.get(CONFIG_URL, timeout=2)
+            url = f"{CONFIG_URL}/paths?hostname={AGENT_HOSTNAME}"
+            response = requests.get(url, timeout=2)
+
             if response.status_code == 200:
                 # This now returns a list of dicts: [{"path": "/etc", "status": "PENDING"}, ...]
                 return response.json().get("paths", [])
@@ -419,9 +421,17 @@ class fimAlerts():
 
     def send_fim_alert(self, data):
         try:
-            requests.post(f"{BACKEND_URL}/alerts", json=data, timeout=15)
+            print(f"[*] Sending FIM alert for: {data.get('file', 'Unknown File')}")
+            response = requests.post(f"{BACKEND_URL}/fim/alerts", json=data, timeout=15)
+            
+            # Check if the backend actually accepted it
+            if response.status_code in [200, 201]:
+                print("[+] Alert successfully accepted by backend!")
+            else:
+                print(f"[!] Backend rejected alert! Status: {response.status_code} - Body: {response.text}")
+                
         except Exception as e:
-            print(f"[!] Failed to ship alert: {e}")
+            print(f"[!] Failed to ship alert (Network Error): {e}")
 
 
 class extraFunctionality():
@@ -472,8 +482,8 @@ def main():
         description="This is agent.py for linux"
     )
     parser.add_argument("--siem_db_url", type=str, default="mongodb://172.17.0.1:27018/", help="used to provide the siem database url")
-    parser.add_argument("--network_backend_url", type=str, default="http://172.17.0.1:8000/api/logs", help="used to provide the network alert to backend")
-    parser.add_argument("--config_url", type=str, default="http://172.17.0.1:8000/api/config", help="used to provide the config url")
+    parser.add_argument("--network_backend_url", type=str, default="http://172.17.0.1:8000/api/network/logs", help="used to provide the network alert to backend")
+    parser.add_argument("--config_url", type=str, default="http://172.17.0.1:8000/api/fim", help="used to provide the config url")
     parser.add_argument("--backend_url", type=str, default="http://172.17.0.1:8000/api", help="used to provide backend url")
     parser.add_argument("--agent_hostname", type=str, default="host1", help="used to provide agent hostname")
 

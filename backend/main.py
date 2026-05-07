@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import sys
 import os
 sys.path.append(os.path.dirname(__file__))
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 print("--- 2. Imported FastAPI ---", flush=True)
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
@@ -12,10 +12,12 @@ from ml_worker import predict_log
 print("--- 3. Imported ML Worker ---", flush=True)
 from database import db
 print("--- 4. Imported DB ---", flush=True)
-from routers.dashboard import router as dashboard_router
+from routers.metrics import router as metrics_router
 from routers.fim import router as fim_router
 from routers.network_logs import router as network_logs_router
+from routers.predictions import router as predictions_router
 from routers.attack_alerts import router as attack_alerts_router
+from pymongo.errors import PyMongoError
 #----------------------------------------------------------------------
 from chatbotcore import parse_query, fetch_logs
 from pydantic import BaseModel
@@ -48,10 +50,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(dashboard_router)
+app.include_router(metrics_router)
 app.include_router(fim_router)
 app.include_router(network_logs_router)
 app.include_router(attack_alerts_router)  # <-- Include the attack_alerts router
+app.include_router(predictions_router)  # <-- Include the predictions router
 
 
 async def alert_janitor():
@@ -92,6 +95,21 @@ def close_stale_alerts(idle_minutes=10):
 class ChatRequest(BaseModel):
     query: str
 
+
+@app.get("/api/devices")
+async def get_devices():
+    try:
+        hostnames = (
+            db.alerts.distinct("hostname")
+            + db.network_logs.distinct("hostname")
+            + db.predictions.distinct("hostname")
+        )
+        unique_hostnames = sorted({h for h in hostnames if h and str(h).strip()})
+        return {"devices": unique_hostnames, "count": len(unique_hostnames)}
+    except PyMongoError as e:
+        raise HTTPException(status_code=500, detail=f"MongoDB error: {str(e)}")
+
+
 def find_duplicate_hostnames():
     collection = db["network_logs"]
     pipeline = [
@@ -119,7 +137,6 @@ def find_duplicate_hostnames():
     return results
 
 
-@app.get("/api/check-duplicates")
 async def get_duplicates():
     return find_duplicate_hostnames()
 

@@ -209,7 +209,7 @@ const AlertsTable = ({ selectedDevice }) => {
                       padding: "4px 8px", borderRadius: "4px", cursor: "pointer", marginRight: "8px", fontSize: "11px"
                     }}
                   >
-                    {isResolved ? "Reopen" : "Resolve"}
+                    {toggleMutation.isPending ? "Updating..." : (isResolved ? "Reopen" : "Resolve")}
                   </button>
                   <button 
                     onClick={() => deleteMutation.mutate(alert._id)}
