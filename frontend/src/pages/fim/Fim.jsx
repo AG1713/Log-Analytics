@@ -439,7 +439,7 @@ export default function Fim() {
         </Card>
 
         <Card>
-          <CardLabel>BROWSE & ADD PATHS</CardLabel>
+          <CardLabel>BROWSE & ADD COMMON PATHS</CardLabel>
           <div style={{ fontSize: "10px", color: COLORS.muted, marginBottom: "10px" }}>
             Click <span style={{ color: COLORS.cyan }}>+ Add</span> to start monitoring a path
           </div>

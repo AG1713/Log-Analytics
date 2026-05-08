@@ -295,7 +295,7 @@ export default function Dashboard() {
         <StatCard label="TOTAL NETWORK TRAFFIC" value={summary.total_records} accent={COLORS.blue} sub="Row count in raw logs" />
         <StatCard label="UNIQUE SOURCE IPs" value={summary.unique_ips || 0} accent={COLORS.purple} sub="Distinct external hosts" />
         <StatCard label="DoS SPIKES DETECTED" value={summary.dos_count || 0} accent={COLORS.red} sub="Identified by ML model" alert={summary.dos_count > 0} />
-        <StatCard label="ACTIVE PORT SCANS" value={summary.port_scan_count || 0} accent={COLORS.orange} sub="Reconnaissance attempts" alert={summary.port_scan_count > 0} />
+        <StatCard label="ACTIVE FUZZERS" value={summary.fuzzers_count || 0} accent={COLORS.orange} sub="Exploitation attempts" alert={summary.fuzzers_count > 0} />
       </div>
 
       {/* ROW 2: High-Level Charts */}

@@ -27,7 +27,7 @@ def attack_summary():
         # Get specific counts for your currently supported models
         dos_count = db.predictions.count_documents({"attack_type": "DoS"})
         # Assuming your label might be "Reconnaissance" or "Port Scan"
-        port_scan_count = db.predictions.count_documents({"attack_type": {"$in": ["Port Scan", "Reconnaissance"]}})
+        fuzzers_count = db.predictions.count_documents({"attack_type": {"$in": ["Exploits"]}})
 
         proto_data = db.network_logs.aggregate([
             {"$group": {"_id": "$proto", "count": {"$sum": 1}}}
@@ -51,7 +51,7 @@ def attack_summary():
             "total_normal": total_normal,
             "unique_ips": unique_ips,               # New
             "dos_count": dos_count,                 # New
-            "port_scan_count": port_scan_count,     # New
+            "fuzzers_count": fuzzers_count,     # New
             "protocol_distribution": protocol_distribution,
             "service_distribution": service_distribution,
         }
@@ -94,7 +94,7 @@ def traffic_timeline(hours: int = 6):
     """Aggregates raw network logs by minute to show traffic volume over time"""
     try:
         # start_time is a native Python datetime object
-        start_time = datetime.utcnow() - timedelta(hours=hours)
+        start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         
         pipeline = [
             # 1. Safely evaluate the string as a Date and compare it
@@ -169,7 +169,7 @@ def analysis_summary():
 
         # 2. Specific KPI counts
         dos_count = db.predictions.count_documents({"attack_type": "DoS"})
-        port_scan_count = db.predictions.count_documents({"attack_type": {"$in": ["Port Scan", "Reconnaissance"]}})
+        fuzzers_count = db.predictions.count_documents({"attack_type": {"$in": ["Exploits"]}})
 
         # 3. Data for the "Attack Signatures" Pie Chart
         pipeline = [
@@ -191,7 +191,7 @@ def analysis_summary():
         return {
             "total_attacks": total_attacks,
             "dos_count": dos_count,
-            "port_scan_count": port_scan_count,
+            "fuzzers_count": fuzzers_count,
             "active_investigations": active_investigations,
             "attack_distribution": attack_distribution
         }
@@ -222,8 +222,8 @@ def attack_timeline(hours: int = 6):
                     "dos_count": {
                         "$sum": {"$cond": [{"$eq": ["$attack_type", "DoS"]}, 1, 0]}
                     },
-                    "port_scan_count": {
-                        "$sum": {"$cond": [{"$in": ["$attack_type", ["Port Scan", "Reconnaissance"]]}, 1, 0]}
+                    "fuzzers_count": {
+                        "$sum": {"$cond": [{"$in": ["$attack_type", ["Exploits"]]}, 1, 0]}
                     },
                     "normal_count": {
                         "$sum": {"$cond": [{"$eq": ["$attack_type", NORMAL_LABEL]}, 1, 0]}
@@ -241,7 +241,7 @@ def attack_timeline(hours: int = 6):
             formatted_data.append({
                 "time": time_str,
                 "DoS": r["dos_count"],
-                "Port Scan": r["port_scan_count"],
+                "Fuzzers": r["fuzzers_count"],
                 "Normal": r["normal_count"]
             })
             

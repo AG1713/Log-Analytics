@@ -89,7 +89,7 @@ def predict_log(log):
                     # The Aggregation Key
                     "src_ip": log.get("src_ip"),
                     "dst_ip": log.get("dst_ip", "unknown"),
-                    "attack_type": attack_type,
+                    "attack_type": attack_type if attack_type != "Exploits" else "Fuzzers",
                     "status": "Active"
                 },
                 {

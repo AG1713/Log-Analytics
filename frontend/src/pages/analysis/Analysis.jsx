@@ -26,7 +26,7 @@ const ATTACK_COLORS = {
   Normal:         COLORS.green,
   BENIGN:         COLORS.green,
   DoS:            COLORS.red,
-  "Port Scan":    COLORS.orange,
+  "Fuzzers":    COLORS.orange,
   Exploits:       COLORS.orange,
   Reconnaissance: COLORS.blue,
 };
@@ -320,7 +320,7 @@ export default function Analysis() {
       <div className="grid grid-cols-4 gap-3 mb-4">
         <StatCard label="TOTAL ATTACKS FLAGGED" value={summary.total_attacks} accent={COLORS.red} sub="Lifetime detections" />
         <StatCard label="DoS DETECTIONS" value={summary.dos_count || 0} accent={COLORS.orange} sub="High confidence flags" />
-        <StatCard label="PORT SCAN DETECTIONS" value={summary.port_scan_count || 0} accent={COLORS.purple} sub="Reconnaissance activity" />
+        <StatCard label="FUZZERS DETECTIONS" value={summary.fuzzers_count || 0} accent={COLORS.purple} sub="Exploitation attempts" />
         <StatCard label="ACTIVE INVESTIGATIONS" value={summary.active_investigations || 0} accent={COLORS.cyan} sub="Pending review" />
       </div>
 
@@ -372,7 +372,7 @@ export default function Analysis() {
                   <Tooltip {...tooltipStyle} />
                   <Legend wrapperStyle={{ fontSize: "10px", color: COLORS.muted }} />
                   <Line type="monotone" dataKey="DoS" stroke={ATTACK_COLORS.DoS} dot={false} strokeWidth={2} />
-                  <Line type="monotone" dataKey="Port Scan" stroke={ATTACK_COLORS["Port Scan"]} dot={false} strokeWidth={2} />
+                  <Line type="monotone" dataKey="Fuzzers" stroke={ATTACK_COLORS["Fuzzers"]} dot={false} strokeWidth={2} />
                 </LineChart>
             </ResponsiveContainer>
           ) : (
@@ -580,7 +580,7 @@ export default function Analysis() {
                         {log.service && log.service !== "-" ? log.service.toUpperCase() : "—"}
                       </td>
                       <td style={{ padding: "10px 16px" }}>
-                        <AttackBadge attack={log.attack_type || log.attack} />
+                        <AttackBadge attack={(log.attack_type === "Exploits") ? "Fuzzers" : log.attack_type || log.attack} />
                       </td>
                       <td style={{ padding: "10px 16px" }}>
                         <SeverityBadge severity={log.severity} />
