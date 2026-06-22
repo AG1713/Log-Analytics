@@ -580,7 +580,7 @@ export default function Analysis() {
                         {log.service && log.service !== "-" ? log.service.toUpperCase() : "—"}
                       </td>
                       <td style={{ padding: "10px 16px" }}>
-                        <AttackBadge attack={(log.attack_type === "Exploits") ? "Fuzzers" : log.attack_type || log.attack} />
+                        <AttackBadge attack={log.attack_type} />
                       </td>
                       <td style={{ padding: "10px 16px" }}>
                         <SeverityBadge severity={log.severity} />

@@ -50,11 +50,17 @@ def predict_log(log):
             return
 
         prediction = result.get("prediction", "Unknown")
-        attack_type = result.get("attack_type", "None")
+        attack_type = result.get("attack_type", "Normal")
         confidence = float(result.get("confidence", 0.0))
         type_confidence = float(result.get("type_confidence", 0.0))
         anomaly = bool(result.get("anomaly", False))
         severity = result.get("severity", SEVERITY_MAP.get(attack_type, "low"))
+        if (attack_type not in ["DoS", "Exploits"]):
+            prediction = "Normal"
+            attack_type = "Normal"
+            severity = "low"
+        if (attack_type == "Exploits"):
+            attack_type = "Fuzzers"
 
         record = {
             "raw_log_id": log.get("_id"),
@@ -83,7 +89,7 @@ def predict_log(log):
 
         predictions_col.insert_one(record)
 
-        if attack_type != "None" and confidence >= 0.50:
+        if attack_type != "Normal" and confidence >= 0.50:
             alerts_col.update_one(
                 {
                     # The Aggregation Key
@@ -122,7 +128,7 @@ def predict_log(log):
                 },
             )
 
-        if attack_type != "None":
+        if attack_type != "Normal":
             print(f"🚨 {attack_type:<20} ({confidence:.2%})")
         else:
             print(f"✅ NORMAL ({confidence:.2%})")

@@ -27,7 +27,7 @@ def attack_summary():
         # Get specific counts for your currently supported models
         dos_count = db.predictions.count_documents({"attack_type": "DoS"})
         # Assuming your label might be "Reconnaissance" or "Port Scan"
-        fuzzers_count = db.predictions.count_documents({"attack_type": {"$in": ["Exploits"]}})
+        fuzzers_count = db.predictions.count_documents({"attack_type": {"$in": ["Fuzzers"]}})
 
         proto_data = db.network_logs.aggregate([
             {"$group": {"_id": "$proto", "count": {"$sum": 1}}}
@@ -169,7 +169,7 @@ def analysis_summary():
 
         # 2. Specific KPI counts
         dos_count = db.predictions.count_documents({"attack_type": "DoS"})
-        fuzzers_count = db.predictions.count_documents({"attack_type": {"$in": ["Exploits"]}})
+        fuzzers_count = db.predictions.count_documents({"attack_type": {"$in": ["Fuzzers"]}})
 
         # 3. Data for the "Attack Signatures" Pie Chart
         pipeline = [
@@ -223,7 +223,7 @@ def attack_timeline(hours: int = 6):
                         "$sum": {"$cond": [{"$eq": ["$attack_type", "DoS"]}, 1, 0]}
                     },
                     "fuzzers_count": {
-                        "$sum": {"$cond": [{"$in": ["$attack_type", ["Exploits"]]}, 1, 0]}
+                        "$sum": {"$cond": [{"$in": ["$attack_type", ["Fuzzers"]]}, 1, 0]}
                     },
                     "normal_count": {
                         "$sum": {"$cond": [{"$eq": ["$attack_type", NORMAL_LABEL]}, 1, 0]}

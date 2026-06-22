@@ -28,33 +28,6 @@ class Attack():
         except Exception as e:
             print(f"Error: {e}")
 
-    def bruteForce(self):
-        print(f"[+] Starting Hydra brute force on {self.targetIP}:{self.targetPort}...")
-        
-        # Determine protocol based on port
-        protocol = "ssh" if int(self.targetPort) == 22 else "ftp"
-        
-        # Hydra command: -L for user list OR -l for single user. 
-        # Since 'username' here is likely a single string, we use -l
-        cmd = ["hydra", "-l", self.username_file, "-P", self.password_file, "-f", self.targetIP, "-s", str(self.targetPort), protocol]
-        
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            print(result.stdout)
-        except Exception as e:
-            print(f"Error running Hydra: {e}")
-
-
-    def portScanner(self,targetIP, maxPort):
-        print(f"[+] Scanning {targetIP} up to port {maxPort}...")
-        # Fixed the f-string and variable name
-        cmd = ["nmap", "-sS", "-p", f"1-{maxPort}", targetIP]
-        
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            print(result.stdout)
-        except Exception as e:
-            print(f"Error running Nmap: {e}")
 
     def _fuzz_worker(self, session, request_name):
         """Helper to run the blocking fuzz loop in a child process."""
@@ -63,6 +36,7 @@ class Attack():
             session.fuzz()
         except Exception as e:
             print(f"[-] Fuzzer Process Error: {e}")
+
 
     def boofuzzNetwork(self):
         print(f"[+] Initializing Boofuzz against {self.targetIP}:{self.targetPort}...")
@@ -124,9 +98,7 @@ def main():
         print("\n==== Attack Menu ====")
         print("1. Exit")
         print("2. DOS Attack (hping3)")
-        print("3. Port Scanning (nmap)")
-        print("4. Brute Force (hydra)")
-        print("5. Fuzzer Attack (boofuzz)")
+        print("3. Fuzzer Attack (boofuzz)")
         
         choice = input("Enter your choice: ").strip()
 
@@ -143,20 +115,6 @@ def main():
 
         elif choice == "3":
             targetIP = input("Enter target IP: ") or "172.17.0.5"
-            max_port = input("Scan ports from 1 to (default 100): ") or "100"
-            attack2 = Attack(targetIP, 0) # Port 0 placeholder
-            attack2.portScanner(targetIP, max_port) # Pass parameters here
-
-        elif choice == "4":
-            targetIP = input("Enter target IP: ") or "172.17.0.5"
-            targetPort = input("Enter target Port (22/21): ") or "22"
-            user = input("Enter username: ") or "root"
-            wordlist = input("Enter path to wordlist: ") or "rockyou.txt"
-            attack3 = Attack(targetIP, targetPort,user,wordlist)
-            attack3.bruteForce()
-
-        elif choice == "5":
-            targetIP = input("Enter target IP: ") or "172.17.0.5"
             targetPort = input("Enter target Port (22/21): ") or "80"
             attack4 = Attack(targetIP, targetPort)
             attack4.boofuzzNetwork()
@@ -166,3 +124,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+ 
